@@ -127,8 +127,11 @@ suitable for numba:
   * Reflectors: trihedral pattern centred on `boresight` with half-power
     `beamwidth`; phase 0.
   * Points: isotropic; phase 0.
-  * Cylinders: a specular glint whose position follows the aspect (§3.3),
-    `rcs = 2*pi*radius*h**2 / lam` with `h = z1 - z0`, at mid height on
+  * Smooth cylinders: a specular glint whose position follows the aspect
+    (§3.3), `rcs = 2*pi*radius*h**2 / lam * |Γ0|**2` with `h = z1 - z0` and
+    `Γ0` the normal-incidence reflection coefficient, as a vertical line of
+    in-phase points at spacing at most `lam / 4` whose coherent broadside
+    sum is that cross-section (so ground lobing integrates over height), on
     the axis, phase 0, host facet the cylinder's first facet.
 * All random draws use `numpy.random.default_rng(scene["seed"])`, so a
   scene compiles to the same geometry every time.
@@ -238,7 +241,7 @@ procedure measures, plus the analogue chain:
 | `antenna` | antenna model (§3) | `g0` 10 (10 dBi), beamwidth 60° |
 | `leak_amp`, `leak_range` | direct tx→rx coupling: field amplitude and equivalent range | 1e-3 √W, 0.1 m |
 | `pt` | transmit power | 10 mW |
-| `gain` | IF volts per √W of received field amplitude | 2.0e4 |
+| `gain` | IF volts per √W of received field amplitude | 2.0e3 |
 | `noise` | additive white noise at the ADC, V rms | 2e-4 |
 | `dc` | ADC offset, V | 0.0 |
 | `oversample` | analogue simulation rate / `fs` | 8 |

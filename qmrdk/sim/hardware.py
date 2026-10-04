@@ -40,7 +40,7 @@ class Hardware:
     leak_amp: float = 1e-3
     leak_range: float = 0.1
     pt: float = 10e-3
-    gain: float = 2.0e4
+    gain: float = 2.0e3
     noise: float = 2e-4
     dc: float = 0.0
     oversample: int = 8

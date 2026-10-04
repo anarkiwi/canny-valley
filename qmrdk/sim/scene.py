@@ -199,7 +199,11 @@ def _block(pos, rcs, phase, kind, par=None, host=-1, normal=None):
         "pos": pos,
         "amp": np.broadcast_to(amp, (n,)).astype(np.complex128),
         "kind": np.full(n, kind, dtype=np.int64),
-        "par": np.zeros((n, 3)) if par is None else np.atleast_2d(par).astype(float),
+        "par": (
+            np.zeros((n, 3))
+            if par is None
+            else np.broadcast_to(np.asarray(par, dtype=float), (n, 3)).copy()
+        ),
         "host": np.broadcast_to(np.asarray(host, dtype=np.int64), (n,)).copy(),
         "normal": np.broadcast_to(
             np.zeros(3) if normal is None else np.asarray(normal, dtype=float), (n, 3)
@@ -254,11 +258,19 @@ def _discrete(objects, facet_ids, lam):
         elif obj["type"] == "point":
             blocks.append(_block(obj["pos"], obj["rcs"], 0.0, ISOTROPIC))
         elif obj["type"] == "cylinder":
+            mat = material(obj["material"])
+            if not mat["smooth"]:
+                continue
             z0, z1 = obj["z"]
-            rcs = 2.0 * np.pi * obj["radius"] * (z1 - z0) ** 2 / lam
-            pos = (*obj["center"], 0.5 * (z0 + z1))
+            g = fresnel(mat["eps_r"], 1.0, "h")
+            rcs = 2.0 * np.pi * obj["radius"] * (z1 - z0) ** 2 / lam * abs(g) ** 2
+            count = max(int(np.ceil(4.0 * (z1 - z0) / lam)), 1)
+            z = z0 + (z1 - z0) * (np.arange(count) + 0.5) / count
+            pos = np.column_stack((np.broadcast_to(obj["center"], (count, 2)), z))
             par = (obj["radius"], 0.0, 0.0)
-            blocks.append(_block(pos, rcs, 0.0, GLINT, par, facet_ids.index(k)))
+            blocks.append(
+                _block(pos, rcs / count**2, 0.0, GLINT, par, facet_ids.index(k))
+            )
         elif obj["type"] not in ("wall", "box"):
             raise ValueError(f"unknown object type {obj['type']!r}")
     return blocks

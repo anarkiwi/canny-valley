@@ -379,27 +379,93 @@ def test_trihedral_pattern(prop):
         assert_paths(p, [(16.0, want, 0)])
 
 
+def cylinder(c, r, h, material="metal"):
+    return {"type": "cylinder", "center": list(c), "radius": r, "z": [0, h],
+            "material": material}  # fmt: skip
+
+
+def glint_points(c, r, h, a):
+    """Glint points of a smooth cylinder seen monostatically from a, and the
+    per-point amplitude sqrt(rcs) / K of the K in-phase points."""
+    k = math.ceil(4 * h / LAM)
+    d = np.asarray(a, float)[:2] - c
+    xy = np.asarray(c, float) + r * d / np.linalg.norm(d)
+    z = h * (np.arange(k) + 0.5) / k
+    return (
+        np.column_stack((np.broadcast_to(xy, (k, 2)), z)),
+        math.sqrt(2 * np.pi * r * h * h / LAM) / k,
+    )
+
+
+def two_ray(points, s, a, ground):
+    """Closed-form coherent monostatic return of in-phase points of amplitude s
+    over a smooth ground (None: no ground)."""
+    total = 0j
+    for P in points:
+        legs = [(np.linalg.norm(P - a), field(a, P))]
+        if ground is not None:
+            Lg = np.linalg.norm(P - flip(a, 2))
+            legs.append((Lg, te(ground, (P[2] + a[2]) / Lg) * field(a, flip(P, 2))))
+        e = sum(g / L * np.exp(-2j * np.pi * L / LAM) for L, g in legs)
+        total += K1 * s * e * e
+    return total
+
+
+def coherent(p):
+    return np.sum(p.amp * np.exp(-2j * np.pi * p.delay * C / LAM))
+
+
 def test_cylinder_glint(prop):
     a = np.array([0.0, 0.0, 1.0])
-    c, r = np.array([1.0, 8.0, 1.0]), 0.3
-    cyl = {
-        "type": "cylinder",
-        "center": [1, 8],
-        "radius": r,
-        "z": [0, 2],
-        "material": "metal",
-    }
-    P = c + r * (a - c) / np.linalg.norm(a - c)
-    L = np.linalg.norm(a - P)
-    amp = K1 * math.sqrt(2 * np.pi * r * 4 / LAM) * field(a, P) ** 2 / L**2
-    assert_paths(prop.paths(geometry([cyl]), a, a, LAM), [(2 * L, amp, 0)])
-    p = prop.paths(geometry([cyl], ground="soil"), a, a, LAM)
-    Lg = np.linalg.norm(P - flip(a, 2))
+    c, r, h = np.array([1.0, 8.0]), 0.3, 2.0
+    pts, s = glint_points(c, r, h, a)
+    L = np.linalg.norm(pts - a, axis=1)
+    want = [(2 * l, K1 * s * field(a, P) ** 2 / l**2, 0) for l, P in zip(L, pts)]
+    assert_paths(prop.paths(geometry([cylinder(c, r, h)]), a, a, LAM), want)
+    p = prop.paths(geometry([cylinder(c, r, h)], ground="soil"), a, a, LAM)
+    Lg = np.linalg.norm(pts - flip(a, 2), axis=1)
     np.testing.assert_allclose(
-        np.sort(p.delay[p.kind < 2]) * C, [2 * L, L + Lg, L + Lg, 2 * Lg]
+        np.sort(p.delay[p.kind < 2]) * C,
+        np.sort(np.concatenate((2 * L, L + Lg, L + Lg, 2 * Lg))),
+        rtol=1e-12,
     )
-    blocked = geometry([cyl, wall(-5, 5, 5.0)])
+    np.testing.assert_allclose(
+        coherent(p) - coherent(prop.paths(geometry([], ground="soil"), a, a, LAM)),
+        two_ray(pts, s, a, SOIL),
+        rtol=1e-9,
+    )
+    blocked = geometry([cylinder(c, r, h), wall(-5, 5, 5.0)])
     assert np.all(prop.paths(blocked, a, a, LAM).kind == 2)
+    assert len(prop.paths(geometry([cylinder(c, r, h, "foliage")]), a, a, LAM)) == 0
+
+
+def test_cylinder_broadside_rcs():
+    r, h, R = 0.1, 3.0, 2000.0
+    a = np.array([0.0, 0.0, h / 2])
+    p = propagation.paths(geometry([cylinder((0, R), r, h)]), a, a, LAM)
+    sigma = 2 * np.pi * r * h * h / LAM
+    want = K1 * math.sqrt(sigma) * G0 / (R - r) ** 2
+    assert abs(coherent(p)) == pytest.approx(want, rel=1e-3)
+
+
+def test_cylinder_ground_lobing_smoothed():
+    r, h, R = 0.1, 3.0, 15.0
+    c = np.array([0.0, R])
+    heights = np.linspace(0.3, 3.0, 28)
+    line, single = [], []
+    for ha in heights:
+        a = np.array([0.0, 0.0, ha])
+        pts, s = glint_points(c, r, h, a)
+        got = coherent(
+            propagation.paths(geometry([cylinder(c, r, h)], "soil"), a, a, LAM)
+        )
+        bare = coherent(propagation.paths(geometry([], "soil"), a, a, LAM))
+        line.append(two_ray(pts, s, a, SOIL))
+        assert got - bare == pytest.approx(line[-1], rel=1e-9)
+        mid = np.array([[pts[0, 0], pts[0, 1], h / 2]])
+        single.append(two_ray(mid, s * len(pts), a, SOIL))
+    swing = [np.ptp(20 * np.log10(np.abs(v))) for v in (line, single)]
+    assert swing[0] < swing[1] - 10.0
 
 
 def test_line_of_sight(prop):

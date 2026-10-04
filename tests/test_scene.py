@@ -131,10 +131,37 @@ def test_facets_geometry():
     length = np.hypot(*(g.facet_p1 - g.facet_p0)[1:5].T)
     np.testing.assert_allclose(np.sort(length), [1, 1, 2, 2])
     np.testing.assert_allclose(np.hypot(*(g.facet_p0[5:] - (-4, 12)).T), 0.5)
-    glint = np.flatnonzero(g.scat_kind == sc.GLINT)
-    assert glint.size == 1 and g.scat_host[glint[0]] == 5
-    assert abs(g.scat_amp[glint[0]]) ** 2 == pytest.approx(2 * np.pi * 0.5 * 9 / LAM)
-    np.testing.assert_allclose(g.scat_pos[glint[0]], (-4, 12, 1.5))
+    glint = g.scat_kind == sc.GLINT
+    k = math.ceil(4 * 3 / LAM)
+    assert glint.sum() == k and np.all(g.scat_host[glint] == 5)
+    np.testing.assert_allclose(
+        g.scat_amp[glint], math.sqrt(2 * np.pi * 0.5 * 9 / LAM) / k
+    )
+    z = 3 * (np.arange(k) + 0.5) / k
+    np.testing.assert_allclose(
+        g.scat_pos[glint], np.column_stack(([-4] * k, [12] * k, z))
+    )
+    np.testing.assert_array_equal(g.scat_par[glint], [[0.5, 0, 0]] * k)
+
+
+@pytest.mark.parametrize("name", ["concrete", "foliage"])
+def test_cylinder_glint_material(name):
+    cyl = {
+        "type": "cylinder",
+        "center": [0, 5],
+        "radius": 0.2,
+        "z": [0, 1],
+        "material": name,
+    }
+    g = sc.compile_scene(_scene([cyl], diffuse_density=0.0), LAM)
+    glint = g.scat_kind == sc.GLINT
+    if not sc.MATERIALS[name]["smooth"]:
+        assert not glint.any()
+        return
+    eps = sc.MATERIALS[name]["eps_r"]
+    gam = (1 - np.sqrt(eps)) / (1 + np.sqrt(eps))
+    want = 2 * np.pi * 0.2 / LAM * abs(gam) ** 2
+    assert np.sum(np.abs(g.scat_amp[glint])) ** 2 == pytest.approx(want, rel=1e-12)
 
 
 def test_diffuse_density_and_rcs():
