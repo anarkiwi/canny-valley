@@ -309,22 +309,29 @@ ignored unless configured.
 
 1. Segment and align ramps (§4), with fractional alignment, so every ramp of
    every position is sampled on the same sweep-frequency grid starting at
-   `f_a = f0 + mu * Ng / fs`.
+   `f0 + mu * Ng / fs`.
 2. Coherent mean of all ramps of the capture (both sets after reversal).
 3. Optional background subtraction: subtract the mean over positions (removes
    antenna leakage and returns that do not vary along the rail), or a
    reference scan of the empty scene.
-4. Window, zero-pad, FFT, keep the positive-frequency half: complex range
-   profile `p_n[k]` for position `n`, with range axis as §5.
+4. Window, zero-pad, FFT, keep the positive-frequency half, and multiply
+   bin `k` by `exp(j * 2*pi * k * (Nu - 1) / (2 * Nfft))` so that phase is
+   referenced to the centre of the ramp: complex range profile `p_n[k]` for
+   position `n`, on the raw range axis `k * (fs / Nfft) * c * T / (2 * B)`
+   (§5 without the `R_cal` correction).
 
-For a point scatterer at range `R` the profile peaks at `R` with phase
-`4 * pi * f_a * R / c`. This holds only if the ramps are indexed in the
-direction of increasing frequency; indexing them the other way conjugates
-the phase and references it to the other band edge. Ramp direction comes
-from firmware timing when available (§4.1). Otherwise images are formed
-under both hypotheses and the one with the higher sharpness
-`sum |I|^4 / (sum |I|^2)^2` is kept; the choice is binary and is recorded
-with the image.
+For a point scatterer at range `R` (one-way, including `R_cal`) the profile
+peaks at `R` with phase `4 * pi * f_m * R / c`, where
+`f_m = f0 + mu * (Ng + (Nu - 1) / 2) / fs` is the sweep frequency at the
+centre of the used part of the ramp. Referencing to the centre makes the
+window kernel real, so the phase is constant across the main lobe and
+linear interpolation between bins does not disturb it. This holds only if
+the ramps are indexed in the direction of increasing frequency; indexing
+them the other way conjugates the phase. Ramp direction comes from the
+calibration (`first_up`, docs/calibration.md) when available. Otherwise
+images are formed under both hypotheses and the one with the higher
+sharpness `sum |I|^4 / (sum |I|^2)^2` is kept; the choice is binary and is
+recorded with the image.
 
 ### 11.3 Image formation: backprojection
 
@@ -332,7 +339,7 @@ For every pixel `(x, y)` on a user-defined grid:
 
 ```
 R_n(x, y) = ( |pixel - tx_n| + |pixel - rx_n| ) / 2 + R_cal
-I(x, y)   = sum_n  p_n( R_n ) * exp( -j * 4 * pi * f_a * R_n / c )
+I(x, y)   = sum_n  p_n( R_n ) * exp( -j * 4 * pi * f_m * R_n / c )
 ```
 
 `tx_n`, `rx_n` are the transmit and receive antenna phase centres at

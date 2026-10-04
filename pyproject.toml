@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qmrdk"
+version = "0.1.0"
+description = "Linux/USB control, signal processing and rail SAR imaging for the QM-RDK radar kit"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy", "scipy", "numba", "finufft", "matplotlib", "pillow", "tqdm",
+  "pyvisa", "pyvisa-py", "pyusb",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-xdist", "pytest-cov", "black", "pylint"]
+
+[project.scripts]
+qmrdk = "qmrdk.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["qmrdk*"]
+
+[tool.setuptools.package-data]
+qmrdk = ["scenes/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["hardware: needs the board attached", "slow: full scene simulations"]
+
+[tool.coverage.run]
+source = ["qmrdk"]
+
+[tool.pylint.main]
+extension-pkg-allow-list = ["numba", "finufft"]
+disable = ["too-many-arguments", "too-many-positional-arguments", "too-many-locals", "too-many-instance-attributes", "too-many-statements", "too-many-branches", "invalid-name", "duplicate-code", "too-few-public-methods", "missing-function-docstring"]
