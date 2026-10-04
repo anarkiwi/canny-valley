@@ -1,0 +1,6 @@
+numpy
+scipy
+pyvisa
+pyvisa-py
+pyusb
+tqdm

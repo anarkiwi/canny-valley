@@ -16,15 +16,17 @@ Bluetooth is not covered.
 
 * The board is a USBTMC instrument speaking SCPI-style ASCII; no firmware
   change is needed and none is planned.
-* Capture is frame based: at most 4096 samples (205 ms at 20 kHz) per
-  frame, read back 31 samples per query. There is no USB streaming, so
-  time-history products are built from gapped frames.
-* There is no sweep sync signal; ramp boundaries come from firmware timing
-  if it proves deterministic, otherwise from the estimator in the
-  signal-processing spec.
-* Several protocol details are documented inconsistently by the vendor and
-  are listed as open questions in the protocol spec. Phase 0 closes them
-  before any device-layer code is written.
+* Capture is frame based: at most 4096 samples (186 ms at the measured
+  21 977 Hz) per frame, read back 31 samples per query, 0.73 s per frame end
+  to end. There is no USB streaming, so time-history products are built from
+  gapped frames.
+* The firmware restarts the sweep for each capture, so USB frames are
+  sweep-synchronous. Continuous recordings from the audio tap have no sync
+  and use the estimator in the signal-processing spec.
+* The vendor documentation is wrong in several places (sample rate, RF
+  power-up state, error codes, accepted parameter forms). The protocol spec
+  records what the board does; its remaining open questions are closed in
+  phase 0 before any device-layer code is written.
 
 ## Dependencies
 

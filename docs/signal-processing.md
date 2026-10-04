@@ -9,14 +9,14 @@ and MATLAB scripts. Acquisition is defined in [protocol.md](protocol.md).
 | Symbol | Meaning | Value / unit |
 |--------|---------|--------------|
 | `c` | speed of light | 299 792 458 m/s |
-| `fs` | ADC sample rate | 20 000 Hz |
+| `fs` | ADC sample rate (measured; the vendor documents 20 000) | 21 977 Hz |
 | `N` | samples per capture | 1 – 4096 |
 | `f0`, `f1` | sweep start / stop frequency (read back from the device) | Hz |
 | `B` | swept bandwidth `f1 - f0` | Hz, ≤ 100e6 |
 | `fc` | centre frequency `(f0 + f1) / 2`; in CW type `fc = f0` | Hz |
 | `lam` | wavelength `c / fc` | m |
 | `T` | one-way ramp time | s |
-| `Nr` | samples per ramp `T * fs` | integer when `T` is a whole number of ms |
+| `Nr` | samples per ramp `T * fs` | not an integer (351.6 for 16 ms) |
 | `mu` | sweep slope `B / T` | Hz/s |
 | `R` | target range | m |
 | `v` | target radial speed, positive approaching | m/s |
@@ -77,11 +77,11 @@ Derived limits:
 | Quantity | Expression | With `B` = 100 MHz, `T` = 16 ms, `N` = 4096 |
 |----------|------------|------|
 | Range resolution | `c / (2B)` | 1.5 m |
-| Unambiguous range (Nyquist) | `(Nr / 2) * c / (2B)` | 240 m |
+| Unambiguous range (Nyquist) | `(Nr / 2) * c / (2B)` | 264 m |
 | Beat frequency per metre | `2B / (cT)` | 41.7 Hz/m |
-| CW speed resolution | `(fs / N) * lam / 2` | 0.31 m/s |
-| CW maximum speed | `(fs / 2) * lam / 2` | 625 m/s |
-| Ramps per capture | `N / Nr` | 12.8 |
+| CW speed resolution | `(fs / N) * lam / 2` | 0.34 m/s |
+| CW maximum speed | `(fs / 2) * lam / 2` | 686 m/s |
+| Ramps per capture | `N / Nr` | 11.6 |
 | Range-Doppler unambiguous speed (§8) | `± lam / (8T)` | ± 0.96 m/s |
 
 ## 4. Sweep segmentation
@@ -93,13 +93,17 @@ channel, so the position of the ramps inside a capture must be established.
 
 In order of preference:
 
-1. **Firmware timing**, if bring-up shows that acquisition starts at a fixed
-   offset from the sweep (protocol open question 4). The offset is then a
-   constant and §4.2 is used only as a self-check.
-2. **Mirror-symmetry estimator** (§4.2) for the free-running triangle type
-   (AUTO), which is the type the vendor GUI uses by default.
+1. **Firmware timing** for USB frames. The firmware restarts the sweep for
+   every capture (protocol §3.4), so turnarounds sit at fixed positions
+   `n_0 + k * Nr` in every frame and ramp direction is known. `n_0` and the
+   restart transient length are board constants. §4.2 is run as a
+   self-check and to refine `n_0` to sub-sample precision.
+2. **Mirror-symmetry estimator** (§4.2) for continuous recordings from the
+   audio tap, where no frame boundary marks the sweep.
 
-Single-shot types (RAMP, TRI) are processed only with source 1.
+Because `Nr` is not an integer, ramp boundaries fall at fractional sample
+positions and §4.3 resampling applies to every product that combines ramps
+coherently.
 
 ### 4.2 Mirror-symmetry estimator (triangle sweeps)
 

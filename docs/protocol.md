@@ -17,7 +17,7 @@ Every statement is tagged with where it comes from:
 | A | Assumption, not yet confirmed on hardware; see [Open questions](#open-questions) |
 
 Items tagged H were observed on a board (USB ID `2012:0013`, firmware
-V1.1.0) using read-only queries. Items tagged A must be resolved by the bring-up probe (implementation plan, phase 0)
+V1.1.0) with `tools/probe.py`. Items tagged A must be resolved by the bring-up probe (implementation plan, phase 0)
 and this document updated before the device layer is written.
 
 ## 1. Physical and transport layer
@@ -96,8 +96,8 @@ Wire form shown is the short form the vendor software uses.
 |---------|-------|-----------|-------|------------------|-----|
 | `SWEEP:FREQSTAR <f>` | `SWEEP:FREQSTAR?` | start frequency, GHz | 2.4 – 2.5 | 2.4 | M, S |
 | `SWEEP:FREQSTOP <f>` | `SWEEP:FREQSTOP?` | stop frequency, GHz | 2.4 – 2.5 | 2.5 | M, S |
-| `SWEEP:RAMPTIME <t>` | `SWEEP:RAMPTIME?` | one-way ramp time, integer ms | 1 – 65536, further bounded by §3.3 | 16 | M, S |
-| `SWEEP:TYPE <type>` | `SWEEP:TYPE?` | `RAMP`\|`TRI`\|`AUTO`\|`CW` or `0`–`3`; query returns the number | — | 2 (AUTO) | M |
+| `SWEEP:RAMPTIME <t>` | `SWEEP:RAMPTIME?` | one-way ramp time, integer ms. A decimal point is a syntax error (-102) although the query returns `16.00`. `0` is accepted by the firmware without error and must be rejected by the host (H) | 1 – 65536, further bounded by §3.3 | 16 | M, S, H |
+| `SWEEP:TYPE <type>` | `SWEEP:TYPE?` | `0`–`3` only; the mnemonics in the manual are a syntax error (-102) (H). Query returns the number | — | 2 (AUTO) | M, H |
 | `SWEEP:START` | — | start sweeping with current settings | — | — | M |
 | `SWEEP:STOP` | — | stop sweep and turn RF off | — | — | M |
 
@@ -110,12 +110,16 @@ Sweep types:
 | 2 | AUTO | linear start→stop→start | free-running until stopped |
 | 3 | CW | single tone at the start frequency; stop frequency and ramp time are accepted but ignored | continuous |
 
-Side effects (M):
+Side effects:
 
-* Changing `SWEEP:TYPE` stops the current sweep and powers the RF down; a
-  `SWEEP:START` is required afterwards.
-* Out-of-range parameters are rejected with error 201 and leave the setting
-  unchanged.
+* Changing `SWEEP:TYPE` stops the sweep; a `SWEEP:START` is required
+  afterwards (M). `POWE:RF?` still reads 1 after the change (H).
+* Out-of-range parameters are rejected with error -222 and leave the setting
+  unchanged (H; the manual says 201).
+* Measured sweep period in AUTO matches `2 * T` to within 1 % (H, from the
+  audio tap: 8.01, 31.93, 79.17 ms for `T` = 4, 16, 40 ms).
+* In types 0 and 1 a frame shows a single sweep of duration `T` at its start
+  and nothing after it (H). Whether type 1 produces a down ramp is unresolved.
 
 ### 3.2 RF output
 
@@ -155,8 +159,12 @@ offers the smallest `refdiv` that satisfies a requested ramp time.
 | `CAPT:FRAM <n>` | acquire `n` consecutive ADC samples into device memory | 1 – 4096 | M |
 | `CAPT:FRAM?` | return the next chunk of the acquired frame | — | M |
 
-ADC: 16 bit, 20 kHz sample rate (50 µs period), input span 5 V centred on
-mid-scale (M, S).
+ADC: 16 bit, input span 5 V centred on mid-scale (M, S). **The sample rate
+is 21 977 Hz, not the documented 20 kHz** (H): fitted against a simultaneous
+96 kHz audio recording of the IF, and consistent with the sweep period seen
+in frames (702 samples per 32 ms) and with frame acquisition time. The value
+matches 16 MHz / 728. All host processing uses the measured rate; axes
+computed by the vendor software with 20 kHz are 9 % short.
 
 `CAPT:FRAM?` response:
 
@@ -165,8 +173,10 @@ mid-scale (M, S).
 * Samples are returned in acquisition order; each query advances a read
   cursor. A frame of `n` samples needs `ceil(n / 31)` queries; the final
   response carries `n mod 31` samples when that is non-zero.
-* If the acquisition has not finished the response is the literal
-  `Not Ready`.
+* `Not Ready` is returned when no frame data is pending: after the last
+  chunk has been read, or with no capture requested (H). It is not returned
+  while a capture is in progress; the first `CAPT:FRAM?` simply blocks until
+  the frame is complete (H).
 
 Sample decoding (S):
 
@@ -175,16 +185,33 @@ code  = int(hex4, 16)            # 0 .. 65535, unsigned
 volts = code * 5 / 65535 - 2.5
 ```
 
+Timing and synchronisation (H):
+
+* `CAPT:FRAM <n>` returns immediately. Acquisition starts about 95 ms later
+  and lasts `n / 21977` s; the first `CAPT:FRAM?` returns when it is done
+  (284 ms for 4096 samples).
+* Each further `CAPT:FRAM?` round trip takes 3.4 ms. A 4096-sample frame
+  takes 0.73 s end to end (1.37 frames/s); 1024 samples take 0.26 s.
+* **Acquisition is synchronised to the sweep.** In AUTO, consecutive frames
+  of a static scene are identical sample for sample (correlation 1.00 at
+  zero lag) for every ramp time tested. The sweep is restarted for the
+  capture: the audio tap shows the sweep phase reset at the start of each
+  acquisition. The first few milliseconds of a frame contain the restart
+  transient.
+* In types 0 and 1, `CAPT:FRAM` triggers one sweep aligned to the frame,
+  provided `SWEEP:START` was sent after the type was selected. Sending
+  `SWEEP:START` or `*TRG` separately is unnecessary and, sent after
+  `CAPT:FRAM`, corrupts the alignment.
+
 Host capture procedure:
 
 1. Send `CAPT:FRAM <n>`.
-2. Wait `n / 20000` s (the acquisition time).
-3. Send `CAPT:FRAM?` and read. On `Not Ready`, back off and retry until an
-   acquisition deadline of `n / 20000` s plus a fixed margin, then fail.
-4. Repeat `CAPT:FRAM?` until `n` samples are collected. Validate every
+2. Send `CAPT:FRAM?` with a read timeout of the acquisition time plus a
+   margin. `Not Ready` at this point is an error.
+3. Repeat `CAPT:FRAM?` until `n` samples are collected. Validate every
    response: length is a multiple of 4, at most 124, all characters
    hexadecimal, and the total never exceeds `n`.
-5. On any validation failure or timeout: device clear, `SYST:ERR?` drain,
+4. On any validation failure or timeout: device clear, `SYST:ERR?` drain,
    discard the frame.
 
 There is no continuous streaming over USB. Consecutive frames are separated
@@ -195,13 +222,14 @@ timestamped on the host at step 1.
 
 | Command | Response | Tag |
 |---------|----------|-----|
-| `*IDN?` / `SYST:IDEN?` | `Quonset Microwave,QM4004,<serial>,<firmware>` | H |
+| `*IDN?` | `Quonset Microwave,QM4004,<serial>,<firmware>` | H |
+| `SYST:IDEN?` | `QM4004` (not the `*IDN?` string the manual describes) | H |
 | `SYST:SERNUM?` | serial number | M |
 | `SYST:MODNUM?` | model number | M |
 | `SYST:FIRM?` | firmware version | M |
 | `SYST:VERS?` | SCPI version `YYYY.V` | M |
 | `SYST:TEMP?` | maximum board temperature, °C | M |
-| `SYST:BLUE?` | Bluetooth link: 0 / 1 (M). No response within 3 s on firmware V1.1.0 (H); not used |  M, H |
+| `SYST:BLUE?` | documented (M) but rejected as an undefined header (-113) with no response on firmware V1.1.0 (H); not used | M, H |
 | `SYST:STAT?` | `<code>, "<text>"` (table below) | M |
 | `SYST:ERR?` | `<code>, "<text>"`; pops the oldest entry of a 10-deep FIFO; `0, "No error"` when empty. First read after power-up returns `-500,"Power on"` (H) | M, H |
 | `SYST:PRES` / `*RST` | return to power-up state (memory location 0) | M |
@@ -237,7 +265,7 @@ Device-specific:
 |------|---------|
 | 0 | no error |
 | 110 | command invalid for this device |
-| 201 | parameter outside the device operating range |
+| 201 | parameter outside the device operating range (M); firmware V1.1.0 returns -222 instead (H) |
 
 Standard SCPI codes the firmware can return: -101, -102, -103, -105, -108,
 -109, -112, -113, -121, -123, -124, -128, -131, -134, -138, -141, -148, -151,
@@ -316,13 +344,13 @@ Resolved by the phase 0 probe; each is one observable test.
 | # | Question | Why it matters |
 |---|----------|----------------|
 | 1 | USB488 capability bits | transport configuration |
-| 2 | Response formats of the queries not yet observed | parser |
+| 2 | Resolved (H): formats recorded in `artifacts/probe/protocol.json`; `*ESR?` 160 after power-up, `*OPT?` `0`, `SYST:VERS?` `1999.0`, `CAPT:STRE?` `0` | — |
 | 3 | Resolved (H): the board powers up sweeping with RF on | — |
-| 4 | Is `CAPT:FRAM` acquisition started in a fixed phase relation to the sweep (any type), or asynchronous? | sweep segmentation in the signal-processing spec |
-| 5 | In RAMP/TRI types, does `CAPT:FRAM` trigger a sweep, or must `SWEEP:START`/`*TRG` be issued, and with what latency? | single-sweep capture |
-| 6 | Does `CAPT:FRAM` block the command parser until the acquisition completes, or return immediately with `Not Ready` on early queries? | wait/poll strategy |
-| 7 | Can a frame be re-read, and what does `CAPT:FRAM?` return after the last chunk? | error recovery |
-| 8 | Time for one `CAPT:FRAM?` round trip | achievable frame rate |
+| 4 | Resolved (H): synchronised, see §3.4. Remaining: the exact sample offset of the first turnaround and the length of the restart transient | segmentation constant, guard |
+| 5 | Resolved (H): `CAPT:FRAM` triggers the sweep, see §3.4. Remaining: whether type 1 sweeps down | single-sweep capture |
+| 6 | Resolved (H): the first query blocks | — |
+| 7 | Resolved (H): `Not Ready` after the last chunk; no re-read | — |
+| 8 | Resolved (H): 3.4 ms | — |
 | 9 | Resolved (H): pyvisa-py detaches the kernel driver | — |
-| 10 | Is the ADC clock derived from the PLL reference (ramp length an exact integer number of samples)? | sweep segmentation |
+| 10 | Sample rate measured as 21 977 Hz (H), so a ramp is not an integer number of samples (351.6 for 16 ms). Remaining: stability of the ratio between ADC and sweep clocks | sweep segmentation |
 | 11 | Scaling divisor: the vendor script divides by 65535; one GUI code path multiplies by 2^-16 | gain error of 1.5e-5, documentation only |
