@@ -1,0 +1,21 @@
+{
+  "name": "yard",
+  "seed": 1,
+  "polarization": "h",
+  "ground": {"material": "soil", "clutter_density": 10.0, "extent": [-12, 12, 3, 28]},
+  "objects": [
+    {"type": "wall", "p0": [-9, 22], "p1": [9, 22], "z": [0, 3], "material": "concrete"},
+    {"type": "box", "center": [5, 12], "size": [4.5, 1.8], "angle": 0, "z": [0, 1.5], "material": "metal"},
+    {"type": "cylinder", "center": [-6, 13], "radius": 0.1, "z": [0, 3], "material": "metal"},
+    {"type": "cylinder", "center": [8.5, 19.5], "radius": 0.1, "z": [0, 3], "material": "metal"},
+    {"type": "cylinder", "center": [-6.5, 19.5], "radius": 1.2, "z": [0, 2.5], "material": "foliage"},
+    {"type": "cylinder", "center": [5.5, 7], "radius": 0.7, "z": [0, 1.8], "material": "foliage"},
+    {"type": "reflector", "pos": [-4, 7, 0.8], "rcs": 10.0, "boresight": -60.3},
+    {"type": "reflector", "pos": [2, 9, 1.0], "rcs": 10.0, "boresight": -102.5},
+    {"type": "reflector", "pos": [-1, 14, 1.0], "rcs": 10.0, "boresight": -85.9},
+    {"type": "reflector", "pos": [6.5, 16, 0.8], "rcs": 10.0, "boresight": -112.1},
+    {"type": "reflector", "pos": [-3, 18, 1.0], "rcs": 10.0, "boresight": -80.5},
+    {"type": "reflector", "pos": [2.5, 19, 1.0], "rcs": 10.0, "boresight": -97.5},
+    {"type": "point", "pos": [0, 26, 0.5], "rcs": 1.0}
+  ]
+}

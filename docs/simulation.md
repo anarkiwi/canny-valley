@@ -41,7 +41,9 @@ A scene is a JSON file (examples in `qmrdk/scenes/`):
 ```
 
 Angles are in degrees in the `xy` plane from `+x`. A reflector's boresight
-is the direction it faces (−90 faces the rail).
+is the direction it faces (default −90, facing the rail); its `beamwidth`
+defaults to 40. A box's `size` is its length along `angle` and its width;
+a cylinder may set `n_facets`.
 
 ### 2.1 Materials
 
@@ -57,14 +59,28 @@ is the direction it faces (−90 faces the rail).
 | `grass` | 8.0 − 2.5j | 0.01 | no |
 
 A material can also be given inline as
-`{"eps_r": [re, im], "sigma0": s, "smooth": true}`. Smooth surfaces act as
+`{"eps_r": [re, im], "sigma0": s, "smooth": true}` (`"eps_r": null` for a
+perfect conductor). Smooth surfaces act as
 mirrors (§3.2); every surface also scatters diffusely with `sigma0`.
 
 Reflection coefficients are Fresnel coefficients at the local grazing
 angle for the polarisation of the antennas (`"polarization": "h"` or `"v"`
 in the scene, default `"h"`; horizontal relative to the ground). For
 vertical facets the field is treated as the complementary polarisation, so
-an `h`-polarised radar sees TM reflection from walls.
+an `h`-polarised radar sees TM reflection from walls. `fresnel(eps_r,
+cos_incidence, pol)` gives the coefficient relative to the mirror image of
+the incident field (the image-method convention), with `pol` `"h"` for TE
+and `"v"` for TM:
+
+```
+root = sqrt(eps_r - sin(theta)**2)
+TE: (cos(theta) - root) / (cos(theta) + root)
+TM: (root - eps_r cos(theta)) / (root + eps_r cos(theta))
+```
+
+Both equal `(1 − √eps_r) / (1 + √eps_r)` at normal incidence and −1 for a
+perfect conductor at every angle; at grazing incidence TE → −1 and TM → +1
+(the reflected field cancels the incident field in both cases).
 
 ### 2.2 Compilation
 
@@ -73,23 +89,30 @@ suitable for numba:
 
 * **Facets**: vertical rectangles, one per wall, four per box, `n_facets`
   per cylinder (default 16). Each has endpoints `p0, p1` (xy), `z0, z1`,
-  unit normal (xy), material permittivity, `sigma0`, a `mirror` flag
-  (smooth and not part of a cylinder) and an object id. All facets occlude.
+  unit normal (xy, to the right of `p0 → p1`, so outward for boxes and
+  cylinders whose vertices run counter-clockwise), material permittivity
+  (infinite for metal), `sigma0`, a `mirror` flag (smooth and not part of a
+  cylinder) and an object id. All facets occlude; mirrors reflect on both
+  sides.
 * **Scatterers**: points with position, complex amplitude `sqrt(rcs)·e^{jφ}`,
   a pattern kind and pattern parameters, a host facet id (−1 for none) and
   a normal.
-  * Diffuse points are drawn uniformly on every facet with density
-    `max(4 / lam**2 * 0.05, 4)` per m² unless the scene sets
-    `"diffuse_density"`, each with `rcs = sigma0 * area / count`, random
-    phase, Lambertian pattern (§3.3), host facet set.
+  * Diffuse points are drawn uniformly on every face with a Poisson count
+    of mean `density * area`, density `max(4 / lam**2 * 0.05, 4)` per m²
+    unless the scene sets `"diffuse_density"`, each with
+    `rcs = sigma0 * area / count`, random phase, Lambertian pattern (§3.3),
+    host facet set, normal the facet normal. Walls have two faces (normals
+    ±), boxes and cylinders one per facet (outward).
   * Ground clutter points are drawn on `ground.extent` (`[x0, x1, y0, y1]`)
-    with `clutter_density` per m² and `rcs = sigma0 * area / count`,
-    excluding points inside object footprints, normal `+z`.
+    with a Poisson count of mean `clutter_density * area` and
+    `rcs = sigma0 * area / count`, then points inside box and cylinder
+    footprints are removed; normal `+z`, Lambertian.
   * Reflectors: trihedral pattern centred on `boresight` with half-power
-    `beamwidth`.
-  * Points: isotropic.
+    `beamwidth`; phase 0.
+  * Points: isotropic; phase 0.
   * Cylinders: a specular glint whose position follows the aspect (§3.3),
-    `rcs = 2*pi*radius*h**2 / lam` with `h = z1 - z0`, at mid height.
+    `rcs = 2*pi*radius*h**2 / lam` with `h = z1 - z0`, at mid height on
+    the axis, phase 0, host facet the cylinder's first facet.
 * All random draws use `numpy.random.default_rng(scene["seed"])`, so a
   scene compiles to the same geometry every time.
 
@@ -123,15 +146,22 @@ surface seen at normal incidence and the wall–ground dihedral.
 Reflection points are found with the image method: reflect the far
 endpoint in the mirror plane, intersect the straight line with the plane.
 A reflection is valid only if the point lies inside the mirror (within the
-facet's segment and height range; ground points anywhere) and both
-endpoints are on the same side of the mirror.
+facet's segment and height range, edges included to rounding tolerance;
+ground points anywhere) and both endpoints are strictly on the same side of
+the mirror. A double-bounce path through the line where two mirrors meet
+(the monostatic wall–ground dihedral, when tx and rx are at equal height)
+is valid in both bounce orders; it is kept once, for the order whose second
+mirror has the lower index (the ground first, then mirror facets in facet
+order). Paths whose amplitude is exactly zero (pattern nulls) are dropped.
 
 ### 3.2 Occlusion
 
 Every straight segment of every path is tested against every facet: it is
 blocked if it crosses the facet rectangle strictly between its endpoints.
 The facet that hosts an endpoint (the mirror being reflected from, or the
-host facet of the scatterer) is excluded from that segment's test. The
+host facet of the scatterer) is excluded from that segment's test; for a
+cylinder glint, whose point lies on the circle outside the facet polygon,
+all facets of its cylinder are excluded. The
 ground does not occlude (antennas and scatterers are above it). A
 scatterer on a facet is visible on a leg only from the side its normal
 faces; ground clutter only from above.
@@ -157,8 +187,16 @@ ray came from and `u_out` towards where the outgoing ray goes:
 
 Legs are computed once per scatterer and mirror option (direct, ground,
 each mirror facet) for tx and for rx in one numba kernel parallel over
-scatterers; scatterer paths are then all valid (tx leg, rx leg) pairs. The
-cost is `scatterers × (2 + mirrors) × facets` segment tests per antenna.
+scatterers; scatterer paths are then all valid (tx leg, rx leg) pairs with
+non-zero pattern. The kernel runs twice: a count pass tests every leg with
+occlusion and records its validity, then, after a prefix sum of the
+per-scatterer counts, a fill pass recomputes only the valid legs' geometry
+(no occlusion) and writes the pairs into exact-size arrays. A glint's point
+depends on the leg pair, so its legs are tested per pair in both passes.
+The cost is `scatterers × (2 + mirrors) × facets` segment tests per
+antenna. Specular paths (at most `mirrors²`) are enumerated densely.
+`line_of_sight(geom, src, points)` applies the same segment test to draw
+shadows.
 
 ## 4. Board
 
