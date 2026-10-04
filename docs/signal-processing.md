@@ -129,13 +129,21 @@ turnarounds repeat every `Nr` samples. Requires `N >= 2 * Nr`.
    turnaround period:
 
    ```
-   J[p] = mean_j rho[p + 2*Nr*j]        p = 0 .. 2*Nr - 1
+   J[p] = mean_j rho(p + 2*Nr*j)        p = -1 .. ceil(2*Nr)
    ```
-5. `p_hat = argmax J`, refined to sub-sample precision by a three-point
-   parabolic fit through `J[p_hat - 1 .. p_hat + 1]` (indices modulo `2*Nr`).
-   Turnarounds lie at `n_k = p_hat / 2 + k * Nr`.
-6. Output: turnaround positions and the quality figure `J[p_hat]` (1 for a
-   noiseless static scene). The figure is stored with every product.
+   `2*Nr` is not an integer, so `rho` is needed at the fractional lags
+   `p + 2*Nr*j`. The numerator is evaluated exactly (band-limited) by
+   applying the fractional part of `2*Nr*j` as a linear phase to
+   `rfft(x, L)^2` before the inverse FFT (one inverse FFT per fold index `j`,
+   batched); the slowly varying energy normaliser is interpolated linearly.
+5. `p_hat = argmax J` over `p = 0 .. ceil(2*Nr) - 1`, refined to sub-sample
+   precision by a three-point parabolic fit through `J[p_hat - 1 .. p_hat + 1]`.
+   Turnarounds lie at `n_k = p_hat / 2 + k * Nr`; both turnaround kinds are
+   mirror points, so the estimate is reported modulo `Nr` as the first
+   turnaround in `[0, Nr)`.
+6. Output: that position and the quality figure `J[p_hat]` (1 for a
+   noiseless static scene when the mirror point lies on the lag grid,
+   marginally below otherwise). The figure is stored with every product.
 
 Properties and limits:
 
@@ -156,12 +164,27 @@ transient of the PLL and IF filter. `Ng` is derived from the measured IF
 filter settling time (implementation plan, phase 0); it is a property of the
 board, not a per-scene setting. Usable ramp length `Nu = Nr - 2*Ng`.
 
-Fractional turnaround positions are applied as a fractional delay
-(linear phase in the frequency domain) so that all ramps of all captures of a
-recording are sampled on the same sweep-frequency grid.
+Fractional turnaround positions are applied as a fractional delay so that
+all ramps of all captures of a recording are sampled on the same
+sweep-frequency grid. With turnarounds `n_k = n_0 + k*Nr` and `Nu =
+floor(Nr - 2*Ng)`, sample `m = 0 .. Nu-1` of the ramp from `n_k` to
+`n_(k+1)` is taken at the fractional position
 
-Ramps of one set are time-reversed so both sets share the same
-frequency-versus-index direction. Output: `ramps[set, ramp, Nu]`.
+```
+n_k + Ng + m           ramp in which frequency rises (set 0)
+n_(k+1) - Ng - m       ramp in which frequency falls (set 1, time-reversed)
+```
+
+so both sets index increasing sweep frequency `f0 + mu*(Ng + m)/fs`. Values
+at fractional positions come from a Kaiser-windowed sinc interpolator
+(half-width 16 samples, window designed for 80 dB), applied to all ramps of
+a batch of frames as one sparse matrix product. A ramp is used only if the
+interpolator support of all its samples lies inside the frame; the two sets
+are truncated to the same count `M`. Direction labels (`first_up`) refer to
+the ramp that begins at `n_0`; `n_0` may be any real and is normalised to the
+first turnaround at or after sample 0, flipping the label for an odd shift.
+`Ng` at least the interpolator half-width keeps the support off the
+turnaround kink. Output: `ramps[set, ramp, Nu]`.
 
 ## 5. Range profile
 
@@ -169,9 +192,12 @@ Per ramp `r[n]`, `n = 0 .. Nu-1`:
 
 1. Subtract the ramp mean.
 2. Multiply by window `w[n]` (default Hann; any `scipy.signal.windows`
-   window selectable).
+   window selectable, in its symmetric form so that the kernel is real
+   about the ramp centre, §11.2).
 3. Real FFT of length `Nfft = Nu * z` (zero-padding factor `z`, default 4,
-   rounded up to a fast length).
+   rounded up to a fast length), positive half `k = 0 .. Nfft/2`, multiplied
+   by `2 / sum(w)` (|X| is the tone amplitude in volts) and by the
+   ramp-centre phase reference of §11.2 step 4.
 4. Level:
 
    ```
@@ -188,8 +214,11 @@ Per ramp `r[n]`, `n = 0 .. Nu-1`:
 
 Combination within a capture:
 
-* **Coherent** (default): mean of the complex spectra of the ramps of one
-  set. Gains `10*log10(M)` dB in signal-to-noise for static targets.
+* **Coherent** (default): mean of the complex spectra of the ramps of each
+  set, then the mean of the two sets' powers. Gains `10*log10(M)` dB in
+  signal-to-noise for static targets; combining the sets in power keeps
+  movers (different beat frequency on rising and falling ramps) and is
+  independent of the direction labelling.
 * **Noncoherent**: mean of `|X|^2` over all ramps of both sets.
 
 Optional range compensation multiplies `|X[k]|` by `R[k]^2`, the two-way
@@ -313,7 +342,10 @@ ignored unless configured.
 2. Coherent mean of all ramps of the capture (both sets after reversal).
 3. Optional background subtraction: subtract the mean over positions (removes
    antenna leakage and returns that do not vary along the rail), or a
-   reference scan of the empty scene.
+   reference scan of the empty scene. The mean over positions is a high-pass
+   filter in slow time: it also removes the aperture-mean part of a target's
+   phase history, which noticeably distorts the cross-range response of a
+   target whose phase varies little along the rail (broadside, long range).
 4. Window, zero-pad, FFT, keep the positive-frequency half, and multiply
    bin `k` by `exp(j * 2*pi * k * (Nu - 1) / (2 * Nfft))` so that phase is
    referenced to the centre of the ramp: complex range profile `p_n[k]` for
@@ -364,8 +396,17 @@ implemented as one numba kernel parallel over pixels.
 | Positions at `dx = lam_min / 4` | `L / dx + 1` | 51 |
 | Phase error from ramp misalignment `delta` | `2 * pi * f_b * delta` | 0.03 rad at 48 m for 0.05 sample |
 
-Pixel spacing defaults to half the resolution in each axis. Output: complex
-image, grid axes, and level in dB relative to the image maximum.
+Pixel spacing defaults to half the resolution in each axis, the cross-range
+resolution evaluated at a reference range (default: centre of the imaged
+ground-range interval) with `L` the extent of the rail positions. Output:
+complex image, grid axes, and level in dB relative to the image maximum.
+
+Measured −3 dB widths are the window's own −3 dB width in bins (0.886 for
+rectangular, 1.44 for Hann) times `c / (2 * mu * Nu / fs)` down range (the
+bandwidth actually used by `Nu` samples) and `lam_m * R / (2 * P * dx)`
+across, with `lam_m = c / f_m` and `P` positions at spacing `dx`.
+Grating lobes of a broadside scatterer appear at `sin(theta_g) = m * lam_m /
+(2 * dx)` (two-way path: phase step `4*pi*dx*sin(theta)/lam` per position).
 
 ## 12. Verification
 

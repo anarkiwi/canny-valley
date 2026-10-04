@@ -172,11 +172,11 @@ procedure measures, plus the analogue chain:
 | `fs` | true ADC rate relative to the sweep clock | 21 977 Hz |
 | `t_start` | time from frame start to the first commanded turnaround | 2.3 ms |
 | `t_reset` | time from frame start at which the sweep is restarted (≤ `t_start`); before it the synthesiser sits at `f_prev` | 0.4 ms |
-| `f_prev` | frequency before the restart | `f1` |
+| `f_prev` | frequency before the restart (`None`: `f1`) | `f1` |
 | `first_up` | the ramp starting at the first turnaround sweeps up | True |
 | `pll_fn`, `pll_zeta` | closed-loop natural frequency and damping of the synthesiser (type 2) | 4 kHz, 0.7 |
-| `hp_fc`, `hp_order` | IF high-pass corner and order (Butterworth) | 40 Hz, 1 |
-| `lp_fc`, `lp_order` | IF low-pass corner and order (Butterworth) | 9 kHz, 4 |
+| `hp_fc`, `hp_order` | IF high-pass corner and order (Butterworth; order 0 removes it) | 40 Hz, 1 |
+| `lp_fc`, `lp_order` | IF low-pass corner and order (Butterworth; order 0 removes it) | 9 kHz, 4 |
 | `r_cal` | fixed extra delay as range (`delay = 2 r_cal / c` added to every path) | 0.35 m |
 | `tx_offset`, `rx_offset` | true antenna phase centres from the sled reference | (−0.06, 0.02, 0), (0.06, 0.02, 0) |
 | `antenna` | antenna model (§3) | `g0` 10 (10 dBi), beamwidth 60° |
@@ -197,33 +197,55 @@ For a frame of `n` samples at `t_k = k / fs`:
    frequency (`f0` if `first_up` else `f1`) until `t_start`, then the
    triangle with turnarounds every `ramp_time`. CW: constant `f0`.
 3. Synthesiser output `f_tx = H_pll * f_cmd` with
-   `H_pll(s) = (2ζω s + ω²) / (s² + 2ζω s + ω²)`, discretised with the
-   first-order hold (exact for the piecewise-linear `f_cmd`) and started in
-   steady state at `f_prev`.
+   `H_pll(s) = (2ζω s + ω²) / (s² + 2ζω s + ω²)`, started in steady state at
+   `f_prev`. `f_cmd` is `f_prev` plus steps and slope changes at its
+   breakpoints, so `f_tx = f_cmd − e` with the tracking error `e` the exact
+   sum, over breakpoints, of the closed-form step and ramp responses of
+   `1 − H_pll` (poles `−ζω ± ω sqrt(ζ² − 1)`). This equals the first-order-hold
+   discretisation on any grid containing the breakpoints, but is exact at
+   arbitrary times (`f_tx(sweep, hw, t)`), including breakpoints off the
+   simulation grid, and is evaluated as a deviation from `f_cmd` that decays
+   to zero.
 4. IF before filtering, summed over paths (plus the leakage path) with
    delay `tau_p + 2 r_cal / c`:
 
    ```
-   s(t_m) = Re sum_p A_p exp( j 2π f_tx(t_m) (tau_p - 2 v_p t_m / c) )
+   s(t_m) = Re sum_p A_p exp( j 2π f_tx(t_m) (tau_p + 2 v_p t_m / c) )
    ```
+   with `v_p` = `Paths.speed` (half the rate of change of path length,
+   negative approaching) and `tau_p` the delay at frame start. The leakage
+   path has delay `2 leak_range / c` and amplitude `leak_amp`.
    Static paths are summed with a type-3 non-uniform FFT
    (`finufft.nufft1d3`, sources `tau_p`, targets `2π f_tx(t_m)`, tolerance
    1e-12); paths with `v_p ≠ 0` are summed directly.
 5. Multiply by `sqrt(pt) · gain`, filter with the IF high-pass and low-pass
-   (analogue Butterworth prototypes, bilinear transform with pre-warping at
-   the simulation rate, started in steady state for the first input value).
+   (analogue Butterworth prototypes, bilinear transform at the simulation
+   rate with each filter pre-warped at its own corner, as one SOS cascade,
+   started in steady state for the first input value).
+   `synthesize_volts` returns the result at `t_k` (noiseless, unquantised).
 6. Take the samples at `t_k` (the grid contains them exactly), add
    Gaussian noise and `dc`, quantise: `code = clip(round((v + 2.5) * 65535 / 5), 0, 65535)`.
 
 `Hardware` also exposes the derived truths the calibration tests compare
-against: `nr = ramp_time * fs`, the commanded turnaround positions
-`t_start * fs + k * nr`, and the IF filter group delay at a given frequency.
+against: `nr(sweep) = ramp_time * fs`, the commanded turnaround positions
+`turnarounds(sweep, n) = t_start * fs + k * nr` inside the frame, and
+`if_group_delay(f)`, the exact group delay of the simulated (pre-warped
+bilinear) IF cascade. `calibration(sweep, f_ref=fs/4)` returns the ideal
+`Calibration`: `n0 = (t_start + if_group_delay(f_ref)) * fs`, i.e. the
+commanded first turnaround delayed by the IF group delay at the centre of
+the beat band (the type-2 PLL adds no delay: its ramps meet at the commanded
+corner); `r_cal`, `first_up` (None for CW) and the antenna offsets are the
+true values.
 
 ## 5. Devices
 
 * `SimSled(sigma=0.0, bias=0.0, seed)`: `move_to(x)` sets the true
   position `x + bias + N(0, sigma)`; `position()` reports the commanded
   value.
+  The true position is the attribute `true_position`.
 * `SimRadar(scene_geometry, hardware, sweep, sled, scan_geometry, seed)`:
-  `capture(n)` computes paths at the sled's true position and synthesises
-  one frame. Path computation is cached per true position.
+  `capture(n)` computes paths with `propagation.paths` for phase centres at
+  the sled's true position (its reported position for sleds without
+  `true_position`) plus `hardware.tx_offset`/`rx_offset`, at `sweep.lam`
+  with `hardware.antenna`, and synthesises one frame with the radar's
+  random generator. Path computation is cached per true position.
