@@ -8,8 +8,9 @@ Replaces the two vendor components that need Windows or MATLAB:
 | MATLAB scripts (NI-VISA) | scripted capture and plotting, plotting of saved CSV | `qmrdk` Python API |
 
 Specifications: [protocol.md](protocol.md),
-[signal-processing.md](signal-processing.md). This plan covers neither
-Bluetooth nor SAR imaging.
+[signal-processing.md](signal-processing.md). Beyond the vendor functions
+the plan adds synthetic aperture imaging using the kit's motorised sled.
+Bluetooth is not covered.
 
 ## Constraints that shape the design
 
@@ -47,7 +48,7 @@ qmrdk/
   device.py      typed command layer: one method per command in protocol §3, range validation, error-queue policy, RF-off-on-exit
   capture.py     frame acquisition state machine (protocol §3.4), hex decoding, recording loop
   recording.py   .npz recordings, vendor CSV import/export (protocol §5)
-  sim.py         simulated device: SCPI state machine + synthetic IF source (signal-processing §11) behind the transport interface
+  sim.py         simulated device: SCPI state machine + synthetic IF source (signal-processing §12) behind the transport interface
   dsp/
     convert.py   codes → volts, level scaling
     segment.py   sweep segmentation
@@ -55,6 +56,9 @@ qmrdk/
     clutter.py   cancellers, background subtraction
     doppler.py   CW spectrum, STFT, range–Doppler
     detect.py    CFAR, peak interpolation
+    sar.py       phase history, backprojection
+  sled.py        sled interface (`home`, `move_to`, `position`) and its simulated implementation
+  scan.py        SAR scan sequencer: move, settle, capture, record position
   viewer.py      live and replay display
   cli.py         entry point
 tools/
@@ -81,6 +85,8 @@ is hardware independent.
 | `qmrdk view` | live display: raw, spectrum, range, Doppler, range–time, Doppler–time; clutter and averaging toggles |
 | `qmrdk replay` | same displays from a recording or vendor CSV |
 | `qmrdk export` | recording → vendor CSV / PNG |
+| `qmrdk sar scan` | step the sled across the aperture, one capture per position, into a recording |
+| `qmrdk sar image` | form and display / export an image from a scan recording |
 | `qmrdk scpi` | send a raw command or query (diagnostic; refuses the commands in protocol §3.8) |
 
 All commands accept `--sim` to run against the simulated device.
@@ -146,7 +152,7 @@ disconnect) recover or fail cleanly with RF off.
 
 * `dsp/` modules per the signal-processing spec, in dependency order:
   convert → segment → range → clutter → doppler → detect.
-* Every row of the verification table in signal-processing §11 is a test.
+* Every row of the verification table in signal-processing §12 is a test.
 
 Exit: all verification rows pass on synthetic data; segmentation and range
 calibration confirmed on phase 0 hardware recordings.
@@ -163,7 +169,19 @@ calibration confirmed on phase 0 hardware recordings.
 Exit: live operation against the simulator in CI (offscreen Qt platform) and
 against hardware manually.
 
-### Phase 5 — documentation and release
+### Phase 5 — SAR
+
+* `dsp/sar.py` per signal-processing §11, verified on synthetic scans.
+* `sled.py` interface with a simulated sled; the driver for the kit's custom
+  sled controller is written once its interface is documented in
+  `docs/sled.md` (pending from the owner).
+* `scan.py` sequencer and CLI `sar scan`, `sar image`; scan recordings add a
+  per-capture `x_pos` field.
+
+Exit: synthetic verification rows pass; a hardware scan of a single strong
+reflector focuses at its surveyed position.
+
+### Phase 6 — documentation and release
 
 * README kept to a summary and usage; details in `docs/` (installation and
   USB access, CLI reference, API reference, hardware notes).
@@ -189,4 +207,6 @@ against hardware manually.
 | Low frame rate from 31-sample paging limits time-history products | measure in phase 0; sample count per capture is the user-facing trade-off |
 | Transmitter left on after a crash | RF-off on every exit path in `device.py`; `qmrdk rf off` always available |
 | Kernel `usbtmc` driver holds the interface | udev rule and documented unbind; confirmed in phase 0 |
+| Sled controller interface not yet documented | SAR processing and sequencer developed against the simulated sled; only the driver depends on it |
+| SAR needs ramp direction and sub-sample alignment across positions | firmware timing if phase 0 finds it; otherwise the sharpness test and fractional alignment in the spec |
 | Board operates in the 2.4 GHz ISM band alongside Wi-Fi and Bluetooth | `info` reports lock state; ambient check procedure (receive with TX terminated) documented |

@@ -4,8 +4,6 @@ Defines how captured ADC frames are turned into range, Doppler and
 time-history products. It replaces the processing of the vendor Windows GUI
 and MATLAB scripts. Acquisition is defined in [protocol.md](protocol.md).
 
-Synthetic-aperture imaging is out of scope.
-
 ## 1. Symbols
 
 | Symbol | Meaning | Value / unit |
@@ -281,10 +279,87 @@ power domain:
 2. Local maxima above threshold are refined by a three-point parabolic fit
    in dB and reported as (range or speed, level).
 
-## 11. Verification
+## 11. Synthetic aperture imaging
+
+The radar is moved along a straight rail (aperture length `L`, 1.5 m for the
+kit sled) and a two-dimensional image of the scene is formed from captures
+taken at known positions. Rail axis `x`, ground range `y`, antenna height
+ignored unless configured.
+
+### 11.1 Acquisition
+
+* Stop-and-go: move, settle, capture one frame, repeat. One frame per
+  position is sufficient; no streaming is required.
+* Triangle sweep (AUTO). All positions use identical sweep parameters.
+* Position spacing `dx <= lam_min / (4 * sin(theta_max))`, where
+  `lam_min = c / f1` and `theta_max` is the largest off-boresight angle from
+  which significant energy is received; `theta_max = 90 deg` gives
+  `dx <= lam_min / 4` (30 mm), which is always alias-free.
+* The scene must not change during the scan. Position error must be small
+  against `lam / 8` (15 mm): millimetre repeatability is required of the
+  sled.
+* A recording stores the commanded and, if the sled reports it, the measured
+  position of every capture (`x_pos`).
+
+### 11.2 Per-position phase history
+
+1. Segment and align ramps (§4), with fractional alignment, so every ramp of
+   every position is sampled on the same sweep-frequency grid starting at
+   `f_a = f0 + mu * Ng / fs`.
+2. Coherent mean of all ramps of the capture (both sets after reversal).
+3. Optional background subtraction: subtract the mean over positions (removes
+   antenna leakage and returns that do not vary along the rail), or a
+   reference scan of the empty scene.
+4. Window, zero-pad, FFT, keep the positive-frequency half: complex range
+   profile `p_n[k]` for position `n`, with range axis as §5.
+
+For a point scatterer at range `R` the profile peaks at `R` with phase
+`4 * pi * f_a * R / c`. This holds only if the ramps are indexed in the
+direction of increasing frequency; indexing them the other way conjugates
+the phase and references it to the other band edge. Ramp direction comes
+from firmware timing when available (§4.1). Otherwise images are formed
+under both hypotheses and the one with the higher sharpness
+`sum |I|^4 / (sum |I|^2)^2` is kept; the choice is binary and is recorded
+with the image.
+
+### 11.3 Image formation: backprojection
+
+For every pixel `(x, y)` on a user-defined grid:
+
+```
+R_n(x, y) = ( |pixel - tx_n| + |pixel - rx_n| ) / 2 + R_cal
+I(x, y)   = sum_n  p_n( R_n ) * exp( -j * 4 * pi * f_a * R_n / c )
+```
+
+`tx_n`, `rx_n` are the transmit and receive antenna phase centres at
+position `n` (the two cantennas are side by side; their offsets from the
+sled reference are configuration). `p_n(R_n)` is linearly interpolated from
+the zero-padded profile. An optional aperture window weights the sum over
+`n`.
+
+Backprojection is chosen over the range-migration algorithm of the MIT
+reference script because it is exact in the near field, accepts unequal
+position spacing and bistatic antenna offsets directly, and its cost
+(`positions × pixels`) is negligible at this aperture size. It is
+implemented as one numba kernel parallel over pixels.
+
+### 11.4 Performance
+
+| Quantity | Expression | `L` = 1.5 m, `B` = 100 MHz |
+|----------|------------|------|
+| Down-range resolution | `c / (2B)` | 1.5 m |
+| Cross-range resolution at range `R` | `lam * R / (2L)` | 0.041 × `R` (0.4 m at 10 m) |
+| Angular resolution | `lam / (2L)` | 2.3° |
+| Positions at `dx = lam_min / 4` | `L / dx + 1` | 51 |
+| Phase error from ramp misalignment `delta` | `2 * pi * f_b * delta` | 0.03 rad at 48 m for 0.05 sample |
+
+Pixel spacing defaults to half the resolution in each axis. Output: complex
+image, grid axes, and level in dB relative to the image maximum.
+
+## 12. Verification
 
 A synthetic source generates captures from the model of §3: a list of
-scatterers (range, speed, amplitude), triangle or CW `f_tx(t)` with arbitrary
+scatterers (position or range, speed, amplitude), radar position, triangle or CW `f_tx(t)` with arbitrary
 sweep phase and optional additive Gaussian noise, quantised to 16-bit codes
 exactly as the device returns them. The same source backs the simulated
 device used by the protocol tests.
@@ -301,7 +376,10 @@ device used by the protocol tests.
 | Range–Doppler | scatterer at (`R`, `v`), `|v| < lam / (8T)` → peak at the corresponding cell |
 | CFAR | on noise-only input the measured false-alarm rate matches `Pfa` within the binomial confidence interval of the trial count |
 | Vendor-equivalent spectrum | matches a direct evaluation of the vendor formula on the same input |
+| SAR point response | synthetic scatterer at `(x, y)` scanned over `L` → image peak within half a resolution cell; -3 dB widths equal `c / (2B)` and `lam * R / (2L)` times the broadening factor of the windows used |
+| SAR ramp direction | sharpness test selects the generated direction for every sweep phase offset |
+| SAR sampling | grating lobes absent at `dx = lam_min / 4`, present at the predicted angle for `dx = lam` |
 
 Recordings from the real board (gitignored `artifacts/`) are used for the
-hardware-dependent items: `Ng`, `R_cal`, and confirmation of the segmentation
-source.
+hardware-dependent items: `Ng`, `R_cal`, confirmation of the segmentation
+source, and a SAR scan of a single strong reflector at a surveyed position.
