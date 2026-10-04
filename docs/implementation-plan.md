@@ -10,7 +10,9 @@ Replaces the two vendor components that need Windows or MATLAB:
 Specifications: [protocol.md](protocol.md),
 [signal-processing.md](signal-processing.md). Beyond the vendor functions
 the plan adds synthetic aperture imaging using the kit's motorised sled.
-Bluetooth is not covered.
+
+Bluetooth is out of scope: it shares the radar's 2.4 GHz band and
+interferes with it. USB is the only control and data path.
 
 ## Constraints that shape the design
 

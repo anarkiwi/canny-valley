@@ -4,7 +4,9 @@ Linux/USB/Python control and signal processing for the Quonset Microwave
 QM-RDK 2.4 GHz FMCW/CW radar demonstration kit, replacing the vendor's
 Windows GUI and MATLAB scripts and adding rail SAR imaging.
 
-Status: specification and plan; no application code yet.
+Control and data are over USB only; the board's Bluetooth link is not used.
+
+Status: specification, plan and bring-up probe; no application code yet.
 
 ## Documents
 

@@ -1,8 +1,11 @@
 # QM-RDK USB control protocol
 
 Host-side specification for controlling the Quonset Microwave QM-RDK radar
-board over USB from Linux. Bluetooth (RFCOMM serial, `CAPTure:STREam`) is out
-of scope.
+board over USB from Linux.
+
+Bluetooth (RFCOMM serial, `CAPTure:STREam`) is out of scope: the board's
+Bluetooth radio shares the 2.4 GHz band the radar transmits in, so the link
+interferes with the measurement. `CAPT:STRE` is never sent.
 
 ## Sources and confidence
 
