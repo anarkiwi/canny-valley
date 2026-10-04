@@ -19,6 +19,9 @@ K1 = LAM / (4 * np.pi) ** 1.5
 K2 = LAM / (4 * np.pi)
 TX = np.array([-0.06, 0.02, 1.0])
 RX = np.array([0.06, 0.02, 1.1])
+RXH = np.array([0.06, 0.02, 1.0])
+WIDE = 170.0
+QW = math.log(0.5) / (2 * math.log(math.cos(math.radians(WIDE / 2))))
 SOIL, CONCRETE = 10.0 - 2.0j, 6.0 - 0.6j
 
 
@@ -39,11 +42,18 @@ def _prop(request):
     return mod
 
 
-def field(a, p, bore=(0.0, 1.0, 0.0)):
-    """Antenna (60 deg beamwidth, boresight `bore`) field gain from a to p."""
+def field(a, p, bore=(0.0, 1.0, 0.0), q=Q):
+    """Antenna (boresight `bore`, exponent q) field gain from a to p."""
     d = np.asarray(p, float) - a
     c = d @ bore / np.linalg.norm(d)
-    return math.sqrt(G0) * max(c, 0.0) ** Q
+    return math.sqrt(G0) * max(c, 0.0) ** q
+
+
+def hx(P, ta, ra):
+    """h-pol induced-dipole factor: cosine between the horizontal directions
+    from P to the (image) antennas."""
+    a, b = (np.asarray(ta) - P)[:2], (np.asarray(ra) - P)[:2]
+    return a @ b / (np.linalg.norm(a) * np.linalg.norm(b))
 
 
 def te(eps, c):
@@ -112,6 +122,7 @@ def test_direct_isotropic(prop):
     g = geometry([point(P)])
     lt, lr = np.linalg.norm(P - TX), np.linalg.norm(P - RX)
     amp = K1 * math.sqrt(0.5) * field(TX, P) * field(RX, P) / (lt * lr)
+    amp *= hx(P, TX, RX)
     assert_paths(prop.paths(g, TX, RX, LAM, prop.Antenna()), [(lt + lr, amp, 0)])
 
 
@@ -126,7 +137,7 @@ def test_ground_bounce(prop):
         gam = te(SOIL, (P[2] + a[2]) / Lg)
         legs.append([(L, field(a, P, b), 0), (Lg, gam * field(a, flip(P, 2), b), 1)])
     want = [
-        (lt + lr, K1 * math.sqrt(0.5) * et * er / (lt * lr), kt | kr)
+        (lt + lr, K1 * math.sqrt(0.5) * et * er * hx(P, TX, RX) / (lt * lr), kt | kr)
         for lt, et, kt in legs[0]
         for lr, er, kr in legs[1]
     ]
@@ -144,20 +155,25 @@ def test_wall_ghost(prop):
     P = np.array([1.0, 8.0, 1.0])
     g = geometry([wall(-5, 5, 12.0), point(P)])
     legs = []
-    for a in (TX, RX):
+    for a in (TX, RXH):
         L, Lw = np.linalg.norm(P - a), np.linalg.norm(P - flip(a, 1, 12))
-        gam = tm(CONCRETE, (24 - a[1] - P[1]) / Lw)
-        legs.append([(L, field(a, P), 0), (Lw, gam * field(a, flip(P, 1, 12)), 1)])
+        gam = -tm(CONCRETE, (24 - a[1] - P[1]) / Lw)
+        legs.append(
+            [
+                (L, field(a, P), 0, a),
+                (Lw, gam * field(a, flip(P, 1, 12)), 1, flip(a, 1, 12)),
+            ]
+        )
     want = [
-        (lt + lr, K1 * math.sqrt(0.5) * et * er / (lt * lr), kt | kr)
-        for lt, et, kt in legs[0]
-        for lr, er, kr in legs[1]
+        (lt + lr, K1 * math.sqrt(0.5) * et * er * hx(P, ta, ra) / (lt * lr), kt | kr)
+        for lt, et, kt, ta in legs[0]
+        for lr, er, kr, ra in legs[1]
     ]
-    L = np.linalg.norm(TX - flip(RX, 1, 12))
-    gam = tm(CONCRETE, (24 - TX[1] - RX[1]) / L)
-    amp = K2 * gam * field(TX, flip(RX, 1, 12)) * field(RX, flip(TX, 1, 12)) / L
+    L = np.linalg.norm(TX - flip(RXH, 1, 12))
+    gam = -tm(CONCRETE, (24 - TX[1] - RXH[1]) / L)
+    amp = K2 * gam * field(TX, flip(RXH, 1, 12)) * field(RXH, flip(TX, 1, 12)) / L
     want.append((L, amp, 2))
-    assert_paths(prop.paths(g, TX, RX, LAM), want)
+    assert_paths(prop.paths(g, TX, RXH, LAM), want)
 
 
 @pytest.mark.parametrize(
@@ -189,14 +205,14 @@ def test_box_shadow(prop):
     p = prop.paths(g, TX, RX, LAM)
     assert np.all(p.kind == 2) and len(p) == 1
     L = np.linalg.norm(TX - flip(RX, 1, 5.75))
-    amp = -K2 * field(TX, flip(RX, 1, 5.75)) * field(RX, flip(TX, 1, 5.75)) / L
+    amp = K2 * field(TX, flip(RX, 1, 5.75)) * field(RX, flip(TX, 1, 5.75)) / L
     assert_paths(p, [(L, amp, 2)])
     tx, rx = TX + (4, 0, 0), RX + (4, 0, 0)
     p = prop.paths(g, tx, rx, LAM)
     lt, lr = np.linalg.norm(P - tx), np.linalg.norm(P - rx)
     direct = np.isclose(p.delay * C, lt + lr, rtol=1e-12)
     assert direct.sum() == 1 and p.kind[direct][0] == 0
-    want = K1 * field(tx, P) * field(rx, P) / (lt * lr)
+    want = K1 * field(tx, P) * field(rx, P) * hx(P, tx, rx) / (lt * lr)
     assert p.amp[direct][0] == pytest.approx(want, rel=1e-9)
     np.testing.assert_array_equal(
         prop.line_of_sight(g, TX, [P, P + (8, 0, 0)]), [False, True]
@@ -223,7 +239,7 @@ def test_lambertian_back_face(prop):
     lt, lr = np.linalg.norm(P - TX), np.linalg.norm(P - RX)
     F = math.sqrt((P[1] - TX[1]) / lt * (P[1] - RX[1]) / lr)
     h = dataclasses.replace(h, scat_normal=-nrm[None])
-    want = K1 * F * field(TX, P) * field(RX, P) / (lt * lr)
+    want = K1 * F * field(TX, P) * field(RX, P) * hx(P, TX, RX) / (lt * lr)
     assert_paths(prop.paths(h, TX, RX, LAM), [(lt + lr, want, 0)])
 
 
@@ -247,7 +263,7 @@ def test_convex_box_visibility(prop):
 def test_wall_glint(prop):
     a = np.array([0.0, 0.0, 1.0])
     p = prop.paths(geometry([wall(-3, 3, 10.0)]), a, a, LAM)
-    gam = (1 - np.sqrt(CONCRETE)) / (1 + np.sqrt(CONCRETE))
+    gam = -(1 - np.sqrt(CONCRETE)) / (1 + np.sqrt(CONCRETE))
     assert_paths(p, [(20.0, K2 * gam * G0 / 20.0, 2)])
     assert len(prop.paths(geometry([wall(1, 5, 10.0)]), a, a, LAM)) == 0
 
@@ -257,8 +273,8 @@ def test_dihedral(prop):
     a = np.array([0.0, 0.0, 1.0])
     L = 2 * math.sqrt(101.0)
     corner = np.array([0.0, 10.0, 0.0])
-    dihedral = -K2 * te(SOIL, 2 / L) * field(a, corner) ** 2 / L
-    want = [(20.0, -K2 * G0 / 20.0, 2), (L, dihedral, 2)]
+    dihedral = K2 * te(SOIL, 2 / L) * field(a, corner) ** 2 / L
+    want = [(20.0, K2 * G0 / 20.0, 2), (L, dihedral, 2)]
     assert_paths(prop.paths(g, a, a, LAM), want)
     rx = a + (0, 0, 0.2)
     r2 = np.array([0.0, 20.0, -1.2])
@@ -268,8 +284,80 @@ def test_dihedral(prop):
     p = prop.paths(g, a, rx, LAM)
     hit = np.isclose(p.delay * C, L, rtol=1e-12)
     assert hit.sum() == 1 and len(p) == 2
-    want = -K2 * te(SOIL, 2.2 / L) * field(a, p1) * field(rx, p2) / L
+    want = K2 * te(SOIL, 2.2 / L) * field(a, p1) * field(rx, p2) / L
     assert p.amp[hit][0] == pytest.approx(want, rel=1e-9)
+
+
+def effective(p, tx, rx, spec, ant):
+    """Effective scalar coefficient of the specular path via point `spec`
+    (0 if the path is absent, as exactly zero paths are dropped)."""
+    L = np.linalg.norm(spec - tx) + np.linalg.norm(rx - spec)
+    hit = np.isclose(p.delay * C, L, rtol=1e-12) & (p.kind == 2)
+    assert hit.sum() <= 1
+    if not hit.any():
+        return 0.0
+    et = field(tx, spec, ant.boresight, ant.q)
+    er = field(rx, spec, ant.boresight, ant.q)
+    return p.amp[hit][0] * L / (K2 * et * er)
+
+
+@pytest.mark.parametrize("d,x", [(5.0, 10.0), (0.02, 10.0), (5.0, 3.0), (5.0, 0.0)])
+def test_wall_reflection_hpol(prop, d, x):
+    """Horizontal plane of incidence on a wall with h-pol: TM, -Gamma_p in the
+    scalar convention (Brewster zero at tan = sqrt(eps), -1 at grazing)."""
+    eps = 4.0
+    mat = {"eps_r": [eps, 0.0], "sigma0": 0.01, "smooth": True}
+    g = geometry([wall(-30, 30, d, z1=3.0, material=mat)])
+    tx, rx = np.array([-x, 0.0, 1.0]), np.array([x, 0.0, 1.0])
+    ant = prop.Antenna(beamwidth=WIDE)
+    gam = effective(prop.paths(g, tx, rx, LAM, ant), tx, rx, np.array([0, d, 1.0]), ant)
+    c = d / math.hypot(x, d)
+    assert gam == pytest.approx(-tm(eps, c), abs=1e-12)
+    if x == 2 * d:
+        assert abs(gam) < 1e-12
+    if d < 0.1:
+        assert abs(gam + 1) < 0.02
+    if x == 0:
+        assert gam == pytest.approx(-(1 - math.sqrt(eps)) / (1 + math.sqrt(eps)))
+
+
+@pytest.mark.parametrize("pol", ["h", "v"])
+@pytest.mark.parametrize("h,x", [(1.0, 2.0), (0.02, 20.0), (1.0, 0.5)])
+def test_ground_two_ray(prop, pol, h, x):
+    """Ground bounce: h-pol is TE (Gamma_s), v-pol TM (-Gamma_p, zero at the
+    Brewster grazing angle atan(1 / sqrt(eps))); both -1 at grazing."""
+    eps = 4.0
+    ground = {"eps_r": [eps, 0.0], "sigma0": 0.01, "smooth": True}
+    g = geometry([], ground=ground, polarization=pol)
+    tx, rx = np.array([-x, 0.0, h]), np.array([x, 0.0, h])
+    ant = prop.Antenna(beamwidth=WIDE, elevation=-90.0)
+    gam = effective(prop.paths(g, tx, rx, LAM, ant), tx, rx, np.zeros(3), ant)
+    c = h / math.hypot(x, h)
+    assert gam == pytest.approx(te(eps, c) if pol == "h" else -tm(eps, c), abs=1e-12)
+    if pol == "v" and x == 2 * h:
+        assert abs(gam) < 1e-12
+    if h < 0.1:
+        assert abs(gam + 1) < 0.02
+
+
+@pytest.mark.parametrize("pol,sign", [("h", 1.0), ("v", -1.0)])
+def test_plate_point_dihedral_signs(prop, pol, sign):
+    """A PEC plate at normal incidence returns with the sign of a point
+    scatterer; a PEC dihedral with its seam along the h field the opposite."""
+    a = np.array([0.0, 0.0, 1.0])
+    pec = {"eps_r": None, "sigma0": 0.01, "smooth": True}
+    plate = geometry([wall(-3, 3, 10.0, material="metal")], polarization=pol)
+    assert_paths(prop.paths(plate, a, a, LAM), [(20.0, sign * K2 * G0 / 20.0, 2)])
+    pt = geometry([point((0, 10, 1), 1.0)], polarization=pol)
+    assert_paths(prop.paths(pt, a, a, LAM), [(20.0, sign * K1 * G0 / 100.0, 0)])
+    if pol == "h":
+        both = geometry([wall(-3, 3, 10.0, material="metal")], ground=pec)
+        L = 2 * math.sqrt(101.0)
+        e2 = field(a, (0, 10, 0)) ** 2
+        assert_paths(
+            prop.paths(both, a, a, LAM),
+            [(20.0, K2 * G0 / 20.0, 2), (L, -K2 * e2 / L, 2)],
+        )
 
 
 def test_trihedral_pattern(prop):

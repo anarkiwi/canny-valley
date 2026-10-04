@@ -63,24 +63,41 @@ A material can also be given inline as
 perfect conductor). Smooth surfaces act as
 mirrors (§3.2); every surface also scatters diffusely with `sigma0`.
 
-Reflection coefficients are Fresnel coefficients at the local grazing
-angle for the polarisation of the antennas (`"polarization": "h"` or `"v"`
-in the scene, default `"h"`; horizontal relative to the ground). For
-vertical facets the field is treated as the complementary polarisation, so
-an `h`-polarised radar sees TM reflection from walls. `fresnel(eps_r,
-cos_incidence, pol)` gives the coefficient relative to the mirror image of
-the incident field (the image-method convention), with `pol` `"h"` for TE
-and `"v"` for TM:
+The antennas' polarisation is `"polarization": "h"` or `"v"` in the scene
+(default `"h"`). Polarisation enters only through the basis vector of a ray
+along unit direction `d`: `h`: `e(d) = normalize(z × d)`; `v`:
+`e(d) = normalize(z − (z·d) d)`. A ray's scalar amplitude `a` stands for
+the field vector `a · e(d)`.
+
+`fresnel(eps_r, cos_incidence, pol)` gives the Fresnel coefficients
+relative to the mirror image of the incident field (`pol` `"h"` for TE,
+`"v"` for TM; −1 for a perfect conductor at every angle):
 
 ```
 root = sqrt(eps_r - sin(theta)**2)
-TE: (cos(theta) - root) / (cos(theta) + root)
-TM: (root - eps_r cos(theta)) / (root + eps_r cos(theta))
+Γs (TE): (cos(theta) - root) / (cos(theta) + root)
+Γp (TM): (root - eps_r cos(theta)) / (root + eps_r cos(theta))
 ```
 
-Both equal `(1 − √eps_r) / (1 + √eps_r)` at normal incidence and −1 for a
-perfect conductor at every angle; at grazing incidence TE → −1 and TM → +1
-(the reflected field cancels the incident field in both cases).
+A bounce at a mirror with unit normal `n` reflects the field vector
+exactly: with `s = normalize(d × n)` (any unit vector ⟂ `d` at normal
+incidence) and `p = s × d`, the reflected direction is
+`d' = d − 2 (d·n) n` and the reflected field
+`E' = M [Γs (E·s) s + Γp (E·p) p]`, `M v = v − 2 (v·n) n`. The field is
+carried as a vector through every bounce of a leg or specular path, starting
+from `e(d)` of the first segment, and projected on `e` of the last segment;
+that projection is the path's reflection coefficient `Γ`. Consequences:
+grazing reflection from a dielectric gives −1 for both polarisations
+(direct and reflected rays cancel); for `h` the ground gives `Γs`, a wall
+in a horizontal plane of incidence `−Γp` (zero at Brewster,
+`tan(theta) = √eps_r`), a perfect-conductor plate at normal incidence `+1`
+and an `h` dihedral with its seam along the field `−1`; for `v` the ground
+gives `−Γp`.
+
+A scatterer re-radiates as an induced dipole: its path is multiplied by
+`−e(d_arrive) · e(d_leave)` of the rays arriving at and leaving it, so a
+monostatic point and a perfect-conductor plate at normal incidence return
+with the same sign in both polarisations.
 
 ### 2.2 Compilation
 
@@ -138,9 +155,10 @@ Mirrors are the ground plane and every facet with the `mirror` flag. A
 
 `Lt`, `Lr`, `L` are unfolded path lengths, `E` the antenna field gains
 `sqrt(g0) · pattern(direction)` along the departing and arriving rays,
-`Γ` the Fresnel coefficients at each bounce (1 for no bounce), `σ` and
-`F_s` the scatterer's cross-section and pattern for the incoming and
-outgoing directions. The specular class produces the glint of a flat
+`Γ` the reflection coefficients of §2.1 for each leg or path (1 for no
+bounce), `σ` the scatterer's cross-section and `F_s` its pattern for the
+incoming and outgoing directions times the dipole polarisation factor of
+§2.1. The specular class produces the glint of a flat
 surface seen at normal incidence and the wall–ground dihedral.
 
 Reflection points are found with the image method: reflect the far

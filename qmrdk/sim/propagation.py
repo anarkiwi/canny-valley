@@ -99,24 +99,22 @@ def mirror_table(geom):
 
     Returns:
         plane (M, 4) normal and offset, facet index (-1 ground), permittivity,
-        TM flag (the ground follows the antenna polarisation, facets the other).
+        True for v (else h) antenna polarisation.
     """
     idx = np.flatnonzero(geom.facet_mirror)
     n = geom.facet_normal[idx]
     off = np.sum(n * geom.facet_p0[idx], axis=1)
     plane = np.column_stack((n, np.zeros(idx.size), off))
     eps = geom.facet_eps[idx]
-    tm = np.full(idx.size, geom.pol == "h")
     if geom.ground_mirror:
         plane = np.vstack(([0.0, 0.0, 1.0, 0.0], plane))
         idx = np.concatenate(([-1], idx))
         eps = np.concatenate(([geom.ground_eps], eps))
-        tm = np.concatenate(([geom.pol == "v"], tm))
     return (
         np.ascontiguousarray(plane.reshape(-1, 4)),
         idx.astype(np.int64),
         eps.astype(np.complex128),
-        tm.astype(np.bool_),
+        geom.pol == "v",
     )
 
 
@@ -199,15 +197,85 @@ def _towards(a, b, t):
 
 
 @_jit
-def _leg(p, nrm, hf, ho, o, a, ant, mir, ft, fobj, occl):
-    """Leg from scatterer point p (normal nrm, on host facet hf or object ho)
-    to antenna a via option o, with occlusion tests if `occl`.
+def _basis(d, vpol):
+    """Unit polarisation vector of a ray along unit d: h = z x d normalised,
+    v = component of z perpendicular to d (x for a vertical ray)."""
+    if vpol:
+        x, y, z = -d[2] * d[0], -d[2] * d[1], 1.0 - d[2] * d[2]
+    else:
+        x, y, z = -d[1], d[0], 0.0
+    n = math.sqrt(x * x + y * y + z * z)
+    if n < 1e-12:
+        return 1.0, 0.0, 0.0
+    return x / n, y / n, z / n
+
+
+@_jit
+def _bounce(e, d, m, mir):
+    """Reflect field vector e (complex) of a ray along unit d in mirror m.
+
+    Returns:
+        reflected field vector and direction.
+    """
+    plane, _, meps, _ = mir
+    n = plane[m]
+    c = d[0] * n[0] + d[1] * n[1] + d[2] * n[2]
+    s = (
+        d[1] * n[2] - d[2] * n[1],
+        d[2] * n[0] - d[0] * n[2],
+        d[0] * n[1] - d[1] * n[0],
+    )
+    ns = math.sqrt(s[0] ** 2 + s[1] ** 2 + s[2] ** 2)
+    s = _basis(d, False) if ns < 1e-12 else (s[0] / ns, s[1] / ns, s[2] / ns)
+    p = (
+        s[1] * d[2] - s[2] * d[1],
+        s[2] * d[0] - s[0] * d[2],
+        s[0] * d[1] - s[1] * d[0],
+    )
+    es = gamma(meps[m], abs(c), False) * (e[0] * s[0] + e[1] * s[1] + e[2] * s[2])
+    ep = gamma(meps[m], abs(c), True) * (e[0] * p[0] + e[1] * p[1] + e[2] * p[2])
+    v = (es * s[0] + ep * p[0], es * s[1] + ep * p[1], es * s[2] + ep * p[2])
+    vn = 2.0 * (v[0] * n[0] + v[1] * n[1] + v[2] * n[2])
+    out = (v[0] - vn * n[0], v[1] - vn * n[1], v[2] - vn * n[2])
+    return out, (d[0] - 2.0 * c * n[0], d[1] - 2.0 * c * n[1], d[2] - 2.0 * c * n[2])
+
+
+@_jit
+def _reflection(a, b, ms, mir):
+    """Scalar coefficient of the ray a -> b (first segment) through mirrors
+    ms[0], ms[1] (-1 none): the reflected field projected on the basis."""
+    dist = _dist(a, b)
+    d = ((b[0] - a[0]) / dist, (b[1] - a[1]) / dist, (b[2] - a[2]) / dist)
+    e0 = _basis(d, mir[3])
+    e = (e0[0] + 0j, e0[1] + 0j, e0[2] + 0j)
+    for m in ms:
+        if m >= 0:
+            e, d = _bounce(e, d, m, mir)
+    b = _basis(d, mir[3])
+    return e[0] * b[0] + e[1] * b[1] + e[2] * b[2]
+
+
+@_jit
+def _dipole(ut, ur, vpol):
+    """Polarisation factor of a scatterer re-radiating as an induced dipole:
+    -(arriving basis vector) . (leaving basis vector), ut and ur unit
+    directions from the scatterer towards where the rays come from and go."""
+    a = _basis((-ut[0], -ut[1], -ut[2]), vpol)
+    b = _basis((ur[0], ur[1], ur[2]), vpol)
+    return -(a[0] * b[0] + a[1] * b[1] + a[2] * b[2])
+
+
+@_jit
+def _leg(p, nrm, hf, ho, o, a, ant, mir, ft, fobj, occl, inbound):
+    """Leg between scatterer point p (normal nrm, on host facet hf or object
+    ho) and antenna a via option o, travelling a -> p if `inbound`, with
+    occlusion tests if `occl`.
 
     Returns:
         valid (and non-zero), unfolded length, Gamma E / length, unit
         direction (3) from p.
     """
-    plane, mf, meps, mtm = mir
+    plane, mf = mir[0], mir[1]
     img = _image(a, o, plane)
     L = _dist(p, img)
     u = ((img[0] - p[0]) / L, (img[1] - p[1]) / L, (img[2] - p[2]) / L)
@@ -221,7 +289,7 @@ def _leg(p, nrm, hf, ho, o, a, ant, mir, ft, fobj, occl):
             r = _towards(p, img, hs / (hs + ha))
             e, f = r, mf[o - 1]
             ok = _inside(r[0], r[1], r[2], f, ft)
-            g = gamma(meps[o - 1], abs(hs + ha) / L, mtm[o - 1])
+            g = _reflection((a[0], a[1], a[2]) if inbound else p, r, (o - 1, -1), mir)
     coef = g * _field(e[0] - a[0], e[1] - a[1], e[2] - a[2], ant) / L if ok else 0j
     ok = ok and coef != 0.0
     if ok and occl:
@@ -268,15 +336,19 @@ def _glint(s, sc, ho, tx, rx, ant, mir, ft, fobj, fill, k0, out):
             if nb == 0.0:
                 continue
             p = (c[0] + par[s, 0] * bx / nb, c[1] + par[s, 0] * by / nb, c[2])
-            okt, lt, ct, _ = _leg(p, zero, -1, ho, i, tx, ant, mir, ft, fobj, True)
+            okt, lt, ct, ut = _leg(
+                p, zero, -1, ho, i, tx, ant, mir, ft, fobj, True, True
+            )
             if not okt:
                 continue
-            okr, lr, cr, _ = _leg(p, zero, -1, ho, j, rx, ant, mir, ft, fobj, True)
+            okr, lr, cr, ur = _leg(
+                p, zero, -1, ho, j, rx, ant, mir, ft, fobj, True, False
+            )
             if not okr:
                 continue
             if fill:
                 out[0][k0 + n] = lt + lr
-                out[1][k0 + n] = scamp[s] * ct * cr
+                out[1][k0 + n] = scamp[s] * ct * cr * _dipole(ut, ur, mir[3])
                 out[2][k0 + n] = 0 if i + j == 0 else 1
             n += 1
     return n
@@ -300,7 +372,7 @@ def _scatterer(s, sc, tx, rx, ant, mir, ft, fobj, vt, vr, fill, k0, out):
             if fill and not v[s, o]:
                 continue
             ok, ll[side, o], cc[side, o], u = _leg(
-                p, nrm[s], host[s], -1, o, a, ant, mir, ft, fobj, not fill
+                p, nrm[s], host[s], -1, o, a, ant, mir, ft, fobj, not fill, side == 0
             )
             uu[side, o, 0], uu[side, o, 1], uu[side, o, 2] = u
             v[s, o] = ok
@@ -310,7 +382,8 @@ def _scatterer(s, sc, tx, rx, ant, mir, ft, fobj, vt, vr, fill, k0, out):
             if not (vt[s, i] and vr[s, j]):
                 continue
             F = _pattern(kind[s], par[s], nrm[s], uu[0, i], uu[1, j])
-            if F <= 0.0:
+            F *= _dipole(uu[0, i], uu[1, j], mir[3])
+            if F == 0.0:
                 continue
             if fill:
                 out[0][k0 + n] = ll[0, i] + ll[1, j]
@@ -340,7 +413,7 @@ def _specular(tx, rx, ant, mir, ft, fobj):
     Returns:
         valid, unfolded length, Gamma1 Gamma2 E_tx E_rx / length.
     """
-    plane, mf, meps, mtm = mir
+    plane, mf = mir[0], mir[1]
     nm = plane.shape[0]
     valid = np.zeros((nm, nm + 1), dtype=np.bool_)
     length = np.zeros((nm, nm + 1))
@@ -358,7 +431,6 @@ def _specular(tx, rx, ant, mir, ft, fobj):
             if not _inside(p1[0], p1[1], p1[2], mf[m1], ft):
                 continue
             L = _dist(tx, r2)
-            g = gamma(meps[m1], abs(h1t - h1i) / L, mtm[m1])
             p2, f2 = p1, -1
             if k > 0:
                 f2 = mf[k - 1]
@@ -371,11 +443,11 @@ def _specular(tx, rx, ant, mir, ft, fobj):
                     p1, p2, ft, fobj, mf[m1], f2, -1
                 ):
                     continue
-                g *= gamma(meps[k - 1], abs(h2p - h2i) / _dist(p1, r1), mtm[k - 1])
             if _blocked(tx, p1, ft, fobj, mf[m1], -1, -1) or _blocked(
                 p2, rx, ft, fobj, f2, -1, -1
             ):
                 continue
+            g = _reflection(tx, p1, (m1, k - 1), mir)
             et = _field(p1[0] - tx[0], p1[1] - tx[1], p1[2] - tx[2], ant)
             er = _field(p2[0] - rx[0], p2[1] - rx[1], p2[2] - rx[2], ant)
             valid[m1, k], length[m1, k], amp[m1, k] = True, L, g * et * er / L
