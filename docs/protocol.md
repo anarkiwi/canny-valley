@@ -13,10 +13,11 @@ Every statement is tagged with where it comes from:
 | M | QM-RDK User Manual rev 1.2.0 |
 | S | Vendor MATLAB scripts (`RDK_CollectAndPlot_*.m`, `RDK_Plot_DataFile.m`) |
 | B | Strings and constants in the vendor Windows GUI binary (v1.2.3) |
+| H | Observed on hardware |
 | A | Assumption, not yet confirmed on hardware; see [Open questions](#open-questions) |
 
-Nothing in this document has been confirmed against a live device. Items
-tagged A must be resolved by the bring-up probe (implementation plan, phase 0)
+Items tagged H were observed on a board (USB ID `2012:0013`, firmware
+V1.1.0) using read-only queries. Items tagged A must be resolved by the bring-up probe (implementation plan, phase 0)
 and this document updated before the device layer is written.
 
 ## 1. Physical and transport layer
@@ -24,11 +25,13 @@ and this document updated before the device layer is written.
 | Property | Value | Tag |
 |----------|-------|-----|
 | Connector | USB Micro-B (J2), bus powered, 5 V / 0.5 A typical | M |
-| Device class | USBTMC, USB488 subclass (interface class `0xFE`, subclass `0x03`, protocol `0x01`) | M, A for exact descriptor values |
+| Device class | USBTMC, USB488 subclass (interface class `0xFE`, subclass `0x03`, protocol `0x01`) | H |
+| Speed / endpoints | full speed; bulk OUT `0x01`, bulk IN `0x81` (64-byte packets), interrupt IN `0x82` | H |
 | Vendor ID | `0x2012` | S, B |
-| Product ID | `0x0017` | S (GUI matches any PID under the VID: `USB0::0x2012::?*INSTR`) |
-| Serial string | Decimal serial number, zero-padded to 4 digits in the VISA resource | S |
-| VISA resource | `USB0::0x2012::0x0017::<serial %04d>::INSTR` | S |
+| Product ID | `0x0013` observed (H); `0x0017` in the vendor script (S). The GUI matches any PID under the VID (B), and so does the host library |
+| Product string | `QM4004` | H |
+| Serial string | Decimal serial number, zero-padded to 4 digits | S, H |
+| VISA resource | `USB0::0x2012::<pid>::<serial %04d>::INSTR` | S, H |
 
 The device is a standard USBTMC instrument, so no vendor driver is needed.
 Messages travel on one bulk-OUT and one bulk-IN endpoint with USBTMC framing:
@@ -52,7 +55,7 @@ libusb); it is not reimplemented.
   `SUBSYSTEM=="usb", ATTR{idVendor}=="2012", MODE="0660", TAG+="uaccess"`.
 * The in-kernel `usbtmc` driver binds the interface on plug-in and exposes
   `/dev/usbtmcN`. The libusb path must detach it or it must be blocked for
-  this VID (A: confirm pyvisa-py detaches automatically).
+  this VID. pyvisa-py detaches it automatically when it has permission (H).
 * In a container the USB bus must be passed through (`/dev/bus/usb` plus the
   `c 189:* rmw` device cgroup rule) so re-enumeration after reset survives.
 
@@ -60,9 +63,8 @@ libusb); it is not reimplemented.
 
 1. Enumerate USB devices with VID `0x2012` exposing a USBTMC interface.
 2. Open each and send `*IDN?`.
-3. Accept the device if the response parses as an identification string (4
-   comma-separated fields) whose product field identifies a QM-RDK (A: exact
-   string; the GUI binary refers to the board as `QM4004`).
+3. Accept the device if the response has the form
+   `Quonset Microwave,QM4004,<serial>,<firmware>` (H).
 
 ## 2. Message syntax
 
@@ -80,8 +82,9 @@ libusb); it is not reimplemented.
 | Header mnemonics longer than 12 characters are rejected (-112) | M |
 
 Numeric parameters are sent as plain decimals (`%f` for frequencies, integers
-elsewhere). Response numeric formats are A; the parser must accept NR1, NR2
-and NR3 forms.
+elsewhere). Observed responses (H): frequencies `2.400`, ramp time `16.00`,
+integers and booleans bare (`2`, `1`), temperature `19.28`. The parser accepts
+NR1, NR2 and NR3 forms.
 
 ## 3. Command reference
 
@@ -118,8 +121,9 @@ Side effects (M):
 
 | Command | Query | Meaning | Default | Tag |
 |---------|-------|---------|---------|-----|
-| `POWE:RF <bool>` | `POWE:RF?` | un-mute / mute the RF output | 0 (off) | M |
+| `POWE:RF <bool>` | `POWE:RF?` | un-mute / mute the RF output | manual: 0 (off); observed after power-up: 1 with the PLL locked in AUTO sweep (H) |  M, H |
 
+The board transmits from the moment it is powered, before any host command.
 Output power is not adjustable (M: up to 1 W class output listed for sweep
 modes, 0.125 W for CW). The host must leave the RF off whenever it is not
 actively capturing: session close, error paths and signal handlers send
@@ -191,15 +195,15 @@ timestamped on the host at step 1.
 
 | Command | Response | Tag |
 |---------|----------|-----|
-| `*IDN?` / `SYST:IDEN?` | `<product>,<serial>,<firmware>,<device id>` | M |
+| `*IDN?` / `SYST:IDEN?` | `Quonset Microwave,QM4004,<serial>,<firmware>` | H |
 | `SYST:SERNUM?` | serial number | M |
 | `SYST:MODNUM?` | model number | M |
 | `SYST:FIRM?` | firmware version | M |
 | `SYST:VERS?` | SCPI version `YYYY.V` | M |
 | `SYST:TEMP?` | maximum board temperature, °C | M |
-| `SYST:BLUE?` | Bluetooth link: 0 / 1 | M |
+| `SYST:BLUE?` | Bluetooth link: 0 / 1 (M). No response within 3 s on firmware V1.1.0 (H); not used |  M, H |
 | `SYST:STAT?` | `<code>, "<text>"` (table below) | M |
-| `SYST:ERR?` | `<code>, "<text>"`; pops the oldest entry of a 10-deep FIFO; `0, "No error"` when empty | M |
+| `SYST:ERR?` | `<code>, "<text>"`; pops the oldest entry of a 10-deep FIFO; `0, "No error"` when empty. First read after power-up returns `-500,"Power on"` (H) | M, H |
 | `SYST:PRES` / `*RST` | return to power-up state (memory location 0) | M |
 | `SYST:REST` | overwrite memory location 0 with factory defaults | M |
 | `SYST:CLRM <1-9>` | erase a saved state | M |
@@ -310,14 +314,14 @@ Resolved by the phase 0 probe; each is one observable test.
 
 | # | Question | Why it matters |
 |---|----------|----------------|
-| 1 | Exact USB descriptors (interface class triple, endpoint addresses, max packet size, USB488 capabilities) | transport configuration, round-trip time |
-| 2 | Exact `*IDN?` string and numeric response formats of every query | parser, discovery |
-| 3 | Does the board sweep after power-up without `SWEEP:START`? The vendor script captures without sending it, while the manual gives RF off as the default | capture sequence |
+| 1 | USB488 capability bits | transport configuration |
+| 2 | Response formats of the queries not yet observed | parser |
+| 3 | Resolved (H): the board powers up sweeping with RF on | — |
 | 4 | Is `CAPT:FRAM` acquisition started in a fixed phase relation to the sweep (any type), or asynchronous? | sweep segmentation in the signal-processing spec |
 | 5 | In RAMP/TRI types, does `CAPT:FRAM` trigger a sweep, or must `SWEEP:START`/`*TRG` be issued, and with what latency? | single-sweep capture |
 | 6 | Does `CAPT:FRAM` block the command parser until the acquisition completes, or return immediately with `Not Ready` on early queries? | wait/poll strategy |
 | 7 | Can a frame be re-read, and what does `CAPT:FRAM?` return after the last chunk? | error recovery |
 | 8 | Time for one `CAPT:FRAM?` round trip | achievable frame rate |
-| 9 | Does pyvisa-py detach the kernel `usbtmc` driver on this kernel, or is a module blacklist needed? | installation |
+| 9 | Resolved (H): pyvisa-py detaches the kernel driver | — |
 | 10 | Is the ADC clock derived from the PLL reference (ramp length an exact integer number of samples)? | sweep segmentation |
 | 11 | Scaling divisor: the vendor script divides by 65535; one GUI code path multiplies by 2^-16 | gain error of 1.5e-5, documentation only |
