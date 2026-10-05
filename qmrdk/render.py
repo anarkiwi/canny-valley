@@ -277,6 +277,55 @@ def draw_sar(ax, img: SarImage, dynamic_range=40):
     return im
 
 
+def truth_targets(geom, src):
+    """Plan positions `[T, 2]` and kinds ("target" or "ghost") of the discrete
+    scatterers (reflectors, points, cylinder axes) and their predicted ghosts."""
+    objs = geom.scene.get("objects", [])
+    pts = [o["pos"][:2] for o in objs if o["type"] in ("reflector", "point")]
+    pts += [o["center"] for o in objs if o["type"] == "cylinder"]
+    ghosts = ghost_positions(geom, src)[:, :2]
+    xy = np.vstack([np.reshape(pts, (-1, 2)), ghosts])
+    return xy, ["target"] * len(pts) + ["ghost"] * len(ghosts)
+
+
+def box_peaks(img: SarImage, xy, half):
+    """Image peak in dB relative to the image maximum inside the square of
+    half-width `half` around each of `xy`; -inf where the box misses the grid."""
+    db = 20.0 * np.log10(np.abs(img.image) / np.abs(img.image).max())
+    inx = np.abs(img.gx[None, :] - xy[:, :1]) <= half
+    iny = np.abs(img.gy[None, :] - xy[:, 1:]) <= half
+    sel = iny[:, :, None] & inx[:, None, :]
+    return np.where(
+        sel.any(axis=(1, 2)), np.where(sel, db, -np.inf).max(axis=(1, 2)), -np.inf
+    )
+
+
+def overlay_truth(ax, geom, src, img: SarImage | None = None, half=0.75):
+    """Truth boxes on the SAR panel: solid for scatterers, dashed for predicted
+    ghosts, walls as lines; labelled with the image peak in each box when
+    `img` is given."""
+    xy, kinds = truth_targets(geom, src)
+    peaks = None if img is None else box_peaks(img, xy, half)
+    for i, ((x, y), k) in enumerate(zip(xy, kinds)):
+        ls = "-" if k == "target" else "--"
+        ax.add_patch(
+            Rectangle((x - half, y - half), 2 * half, 2 * half, fill=False,
+                      ec="#00e5ff", ls=ls, lw=0.8, zorder=6)
+        )  # fmt: skip
+        if peaks is not None and np.isfinite(peaks[i]):
+            ax.text(x + half, y + half, f"{peaks[i]:.0f}", color="#00e5ff",
+                    fontsize="xx-small", va="bottom", zorder=6, clip_on=True)  # fmt: skip
+    walls = [
+        k for k, o in enumerate(geom.scene.get("objects", [])) if o["type"] == "wall"
+    ]
+    wf = np.isin(geom.facet_obj, walls)
+    ax.add_collection(
+        LineCollection(np.stack((geom.facet_p0[wf], geom.facet_p1[wf]), axis=1),
+                       colors="#00e5ff", linewidths=0.8, linestyles=":", zorder=6)
+    )  # fmt: skip
+    return peaks
+
+
 def sar_title(lam, length):
     res = f"{lam / (2.0 * length):.3f} R" if length > 0 else "inf"
     return f"SAR  L = {length:.2f} m,  cross-range res. = {res} m"
@@ -301,6 +350,9 @@ def _figure(geom, geometry, x_pos, lam, img, dynamic_range, dpi, extent=None):
         draw_scene(axes[0], geom, geometry, x_pos, extent=extent)
         axes[0].set_title(geom.scene.get("name", "scene"))
     im = draw_sar(axes[-1], img, dynamic_range)
+    if geom is not None:
+        overlay_truth(axes[-1], geom, rail_centre(geometry, x_pos),
+                      img if np.any(img.image) else None)  # fmt: skip
     axes[-1].set(xlim=extent[:2], ylim=extent[2:])
     if x_pos is not None and lam is not None:
         axes[-1].set_title(sar_title(lam, float(np.ptp(x_pos))))

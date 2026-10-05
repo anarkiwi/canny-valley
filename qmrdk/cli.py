@@ -59,7 +59,7 @@ def _sim_scan(scene, sweep, geometry, args, hw):
 
 
 def _scan(args):
-    sweep, geometry = Sweep(), ScanGeometry(height=args.height)
+    sweep, geometry = _sweep(args), ScanGeometry(height=args.height)
     if args.sim:
         _, rec = _sim_scan(_scene(args.scene), sweep, geometry, args, _board(args))
     else:
@@ -130,7 +130,7 @@ def _json_default(o):
 
 
 def _demo(args):
-    hw, sweep, geometry = _board(args), Sweep(), ScanGeometry(height=args.height)
+    hw, sweep, geometry = _board(args), _sweep(args), ScanGeometry(height=args.height)
     scene = _scene(args.scene)
     geom, rec = _sim_scan(scene, sweep, geometry, args, hw)
     clipped = _clipping(rec.codes, args.scene)
@@ -194,7 +194,14 @@ def _add_calib(sub):
     add_commands(calib.add_subparsers(dest="calib_command", required=True))
 
 
+def _sweep(args):
+    return Sweep(f0=args.f0 * 1e9, f1=args.f1 * 1e9, ramp_time=args.ramp_time * 1e-3)
+
+
 def _sim_options(p, seed=0):
+    p.add_argument("--f0", type=float, default=2.4, help="sweep start, GHz")
+    p.add_argument("--f1", type=float, default=2.5, help="sweep stop, GHz")
+    p.add_argument("--ramp-time", type=float, default=16.0, help="ramp time, ms")
     p.add_argument("--length", type=float, default=1.5, help="rail span, m")
     p.add_argument("--dx", type=float, help="position spacing, m (lam_min / 4)")
     p.add_argument("--n", type=int, default=4096, help="samples per capture")

@@ -10,6 +10,9 @@ from sarscene import GEOMETRY, HW, SWEEP, scan, tiny
 
 from qmrdk.dsp.sar import SarImage, form_image
 from qmrdk.render import (
+    box_peaks,
+    overlay_truth,
+    truth_targets,
     animate,
     draw_sar,
     draw_scene,
@@ -180,3 +183,33 @@ def test_animate_more_frames_than_positions(tmp_path, scanned):
             frames=4 * rec.x_pos.size, dpi=30)  # fmt: skip
     with Image.open(path) as im:
         assert im.n_frames == rec.x_pos.size
+
+
+def test_box_peaks_closed_form():
+    gx, gy = np.arange(-2.0, 2.01, 0.5), np.arange(0.0, 4.01, 0.5)
+    image = np.full((gy.size, gx.size), 1e-3, dtype=complex)
+    image[gy == 2.0, gx == 0.0] = 1.0
+    image[gy == 1.0, gx == -1.5] = 0.1
+    img = SarImage(image, gx, gy, 1.0, True, 0.0)
+    xy = np.array([[0.0, 2.0], [-1.5, 1.0], [1.5, 3.5], [10.0, 10.0]])
+    np.testing.assert_allclose(box_peaks(img, xy, 0.3)[:3], [0.0, -20.0, -60.0])
+    assert box_peaks(img, xy, 0.3)[3] == -np.inf
+
+
+def test_truth_targets_and_overlay(geom):
+    src = np.array([0.0, 0.0, 1.0])
+    xy, kinds = truth_targets(geom, src)
+    objs = geom.scene["objects"]
+    n = sum(o["type"] in ("reflector", "point", "cylinder") for o in objs)
+    assert kinds.count("target") == n
+    np.testing.assert_allclose(
+        xy[kinds.count("target") :], ghost_positions(geom, src)[:, :2]
+    )
+    ax = Figure().add_subplot()
+    assert overlay_truth(ax, geom, src) is None
+    assert len(ax.patches) == len(xy)
+    img = SarImage(
+        np.ones((3, 3), complex), np.arange(3.0), np.arange(3.0), 1.0, True, 0.0
+    )
+    peaks = overlay_truth(Figure().add_subplot(), geom, src, img)
+    assert peaks.shape == (len(xy),)
