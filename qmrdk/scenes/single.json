@@ -1,0 +1,8 @@
+{
+  "name": "single",
+  "seed": 1,
+  "ground": {"material": "soil", "clutter_density": 0.0, "extent": [-5, 5, 1, 15]},
+  "objects": [
+    {"type": "reflector", "pos": [0.3, 8, 1.0], "rcs": 10.0, "boresight": -90, "beamwidth": 40}
+  ]
+}
