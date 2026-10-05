@@ -185,13 +185,13 @@ def _calib_unavailable(args):
 
 
 def _add_calib(sub):
-    calib = sub.add_parser("calib", help="board calibration (docs/calibration.md)")
     try:
         from qmrdk.calib import add_commands  # pylint: disable=C0415
     except ImportError as e:
+        calib = sub.add_parser("calib", help="board calibration (docs/calibration.md)")
         calib.set_defaults(func=_calib_unavailable, reason=str(e))
         return
-    add_commands(calib.add_subparsers(dest="calib_command", required=True))
+    add_commands(sub)
 
 
 def _sweep(args):

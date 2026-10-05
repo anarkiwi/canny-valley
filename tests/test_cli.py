@@ -138,7 +138,8 @@ def test_calib_unavailable(monkeypatch, capsys):
 
 def test_calib_commands(monkeypatch):
     def add_commands(sub):
-        sub.add_parser("probe").set_defaults(func=lambda args: 7)
+        group = sub.add_parser("calib").add_subparsers(required=True)
+        group.add_parser("probe").set_defaults(func=lambda args: 7)
 
     monkeypatch.setitem(
         sys.modules, "qmrdk.calib", types.SimpleNamespace(add_commands=add_commands)
