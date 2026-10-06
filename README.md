@@ -4,6 +4,13 @@ Linux/USB/Python control and signal processing for the Quonset Microwave
 QM-RDK 2.4 GHz FMCW/CW radar demonstration kit, replacing the vendor's
 Windows GUI and MATLAB scripts and adding rail SAR imaging.
 
+![Simulated rail SAR scan of the yard scene: truth (left) and the image as the aperture grows (right)](docs/images/sar-demo.png)
+
+Simulated scan of the built-in `yard` scene (`qmrdk sar demo --scene yard`):
+the scene with its radar shadows and multipath ghosts (left) and the
+backprojected SAR image as the sled moves along the 1.5 m rail (right),
+focusing from range rings to resolved targets as the aperture grows.
+
 Control and data are over USB only; the board's Bluetooth link is not used.
 The USB driver ([docs/driver.md](docs/driver.md)) configures, captures and
 keeps the RF off outside captures; every board command also runs against a
