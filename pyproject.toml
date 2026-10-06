@@ -27,7 +27,8 @@ qmrdk = ["scenes/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["hardware: needs the board attached", "slow: full scene simulations"]
+addopts = '-m "not hardware"'
+markers = ["hardware: needs the board attached (run with -m hardware)", "slow: full scene simulations"]
 
 [tool.coverage.run]
 source = ["qmrdk"]

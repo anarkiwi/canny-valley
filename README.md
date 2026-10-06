@@ -5,9 +5,10 @@ QM-RDK 2.4 GHz FMCW/CW radar demonstration kit, replacing the vendor's
 Windows GUI and MATLAB scripts and adding rail SAR imaging.
 
 Control and data are over USB only; the board's Bluetooth link is not used.
-USB capture is implemented and `calib timing`/`calib guard` run on the
-board; the sled driver is not implemented, so scans and calibration steps 3
-and 4 run against the simulated board and scene with `--sim`.
+The USB driver ([docs/driver.md](docs/driver.md)) configures, captures and
+keeps the RF off outside captures; every board command also runs against a
+simulated board with `--sim`. The sled driver is not implemented, so scans
+and calibration steps 3 and 4 run against the simulated board and scene.
 
 ## Install
 
@@ -20,6 +21,12 @@ or build `docker/Dockerfile`.
 ## Usage
 
 ```
+qmrdk list                                                    # boards and *IDN?
+qmrdk info                                                    # settings, lock, temperature, status, errors
+qmrdk set --f0 2.4 --f1 2.5 --ramp-time 16 --type triangle    # configure; leaves the sweep running
+qmrdk rf off                                                  # stop the sweep (RF off)
+qmrdk scpi 'SYST:TEMP?'                                       # guarded raw command
+qmrdk capture --frames 10 --n 4096 --out artifacts/rec.npz    # frames into a recording
 qmrdk sar demo --scene yard --out artifacts/yard.png          # simulated scan, calibration, animated truth vs SAR
 qmrdk sar scan --sim --scene yard --out artifacts/scan.npz    # simulated scan recording
 qmrdk sar image artifacts/scan.npz --cal cal.json --scene yard --out artifacts/scan.png
@@ -37,6 +44,7 @@ simulated sweep. Scenes are JSON files; built-in scenes are in
 
 * [Implementation plan](docs/implementation-plan.md)
 * [USB control protocol](docs/protocol.md)
+* [USB driver](docs/driver.md)
 * [Signal processing](docs/signal-processing.md)
 * [Simulation model](docs/simulation.md)
 * [Calibration procedure](docs/calibration.md)

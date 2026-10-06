@@ -9,13 +9,25 @@ os.environ.setdefault("NUMBA_NUM_THREADS", "2")
 
 # pylint: disable=wrong-import-position
 import pytest
-from fakeboard import FakeManager
 
-from qmrdk import radar
+from qmrdk import transport
+from qmrdk.sim import scpi
 
 
 @pytest.fixture(autouse=True)
 def _no_usb(monkeypatch):
-    """No test reaches a real USB device: the board is absent unless a test
-    installs a fake one."""
-    monkeypatch.setattr(radar, "_manager", FakeManager)
+    """No test reaches a real USB device: the bus is empty unless a test
+    attaches simulated boards, and `--sim` starts from a fresh board."""
+    monkeypatch.setattr(transport, "_manager", lambda: scpi.SimManager([]))
+    scpi.default_manager.cache_clear()
+
+
+@pytest.fixture(name="attach")
+def fixture_attach(monkeypatch):
+    """`attach(*boards)` puts simulated boards on the bus; returns the first."""
+
+    def attach(*boards):
+        monkeypatch.setattr(transport, "_manager", lambda: scpi.SimManager(boards))
+        return boards[0] if boards else None
+
+    return attach

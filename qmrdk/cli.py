@@ -9,7 +9,8 @@ import sys
 import numpy as np
 
 from qmrdk.config import Calibration, ScanGeometry, Sweep
-from qmrdk.constants import ADC_MAX
+from qmrdk.constants import ADC_MAX, FS_NOMINAL
+from qmrdk.device import SWEEP_TYPES, Device, DeviceError
 from qmrdk.dsp.sar import form_image
 from qmrdk.radar import HardwareSled, UsbRadar
 from qmrdk.recording import Recording
@@ -24,6 +25,8 @@ from qmrdk.scan import run_scan, scan_positions
 from qmrdk.sim.devices import SimRadar, SimSled
 from qmrdk.sim.hardware import Hardware
 from qmrdk.sim.scene import builtin_scene, compile_scene, load_scene
+from qmrdk.sim.scpi import default_manager
+from qmrdk.transport import resources
 
 
 def _scene(spec):
@@ -195,8 +198,144 @@ def _add_calib(sub):
     add_commands(sub)
 
 
+def _manager(args):
+    return default_manager() if args.sim else None
+
+
+def _device(args):
+    return Device(args.resource, args.serial, _manager(args))
+
+
+def _dump(obj):
+    print(json.dumps(obj, indent=2, default=_json_default))
+
+
+def _list(args):
+    manager = _manager(args)
+    names = [args.resource] if args.resource else resources(manager, args.serial)
+    for name in names:
+        try:
+            with Device(name, args.serial, manager) as dev:
+                print(f"{name}\t{dev.idn.serial}\t{dev.idn.firmware}")
+        except DeviceError as e:
+            print(f"{name}\t{e}", file=sys.stderr)
+    return 0 if names else 1
+
+
+def _settings(dev):
+    s = dev.settings()
+    return {
+        "sweep": dataclasses.asdict(s.sweep),
+        "ref_div": s.ref_div,
+        "rf": s.rf,
+        "locked": s.locked,
+    }
+
+
+def _info(args):
+    with _device(args) as dev:
+        _dump(
+            {
+                "resource": dev.transport.name,
+                "idn": dataclasses.asdict(dev.idn),
+                **_settings(dev),
+                "temperature": dev.temperature(),
+                "status": dataclasses.asdict(dev.status()),
+                "errors": dev.boot_errors + dev.errors(),
+            }
+        )
+    return 0
+
+
+def _set(args):
+    with _device(args) as dev:
+        dev.configure(_sweep(args))
+        dev.leave_rf_on = True
+        _dump(_settings(dev))
+    return 0
+
+
+def _rf(args):
+    with _device(args) as dev:
+        dev.rf(args.state == "on")
+        dev.leave_rf_on = args.state == "on"
+        _dump(_settings(dev))
+    return 0
+
+
+def _scpi(args):
+    with _device(args) as dev:
+        resp = dev.scpi(args.message, force=args.force)
+    if resp is not None:
+        print(resp)
+    return 0
+
+
+def _capture(args):
+    with _device(args) as dev:
+        sweep = dev.configure(_sweep(args))
+        codes, t_host = dev.capture_many(args.n, args.frames)
+        extra = {
+            "idn": dataclasses.asdict(dev.idn),
+            "resource": dev.transport.name,
+            "ref_div": dev.settings().ref_div,
+            "fs": FS_NOMINAL,
+        }
+    Recording(codes, sweep, t_host, extra=extra).save(args.out)
+    _clipping(codes, args.out)
+    print(f"{args.out}: {codes.shape[0]} frames of {codes.shape[1]} samples")
+    return 0
+
+
+def _hw_options(p, sweep=False):
+    p.add_argument(
+        "--sim", action="store_true", help="simulated board (qmrdk.sim.scpi)"
+    )
+    p.add_argument("--resource", help="VISA resource name")
+    p.add_argument("--serial", help="board serial number")
+    if sweep:
+        p.add_argument("--f0", type=float, default=2.4, help="sweep start, GHz")
+        p.add_argument("--f1", type=float, default=2.5, help="sweep stop, GHz")
+        p.add_argument("--ramp-time", type=float, default=16.0, help="ramp time, ms")
+        p.add_argument("--type", choices=list(SWEEP_TYPES), default="triangle")
+
+
+def _add_hardware(sub):
+    p = sub.add_parser("list", help="boards on USB and their *IDN?")
+    _hw_options(p)
+    p.set_defaults(func=_list)
+    p = sub.add_parser(
+        "info", help="identity, settings, lock, temperature, status, errors"
+    )
+    _hw_options(p)
+    p.set_defaults(func=_info)
+    p = sub.add_parser("set", help="configure and start the sweep (RF left on)")
+    _hw_options(p, sweep=True)
+    p.set_defaults(func=_set)
+    p = sub.add_parser("rf", help="start (on, left on) or stop (off) the sweep")
+    p.add_argument("state", choices=("on", "off"))
+    _hw_options(p)
+    p.set_defaults(func=_rf)
+    p = sub.add_parser("scpi", help="raw command or query (protocol §3.8 refused)")
+    p.add_argument("message")
+    p.add_argument("--force", action="store_true", help="allow *SAV 0 and SYST:REST")
+    _hw_options(p)
+    p.set_defaults(func=_scpi)
+    p = sub.add_parser("capture", help="frames into a recording")
+    p.add_argument("--frames", type=int, default=1)
+    p.add_argument("--n", type=int, default=4096, help="samples per frame")
+    p.add_argument("--out", required=True, help="recording .npz")
+    _hw_options(p, sweep=True)
+    p.set_defaults(func=_capture)
+
+
 def _sweep(args):
-    return Sweep(f0=args.f0 * 1e9, f1=args.f1 * 1e9, ramp_time=args.ramp_time * 1e-3)
+    return Sweep(
+        f0=args.f0 * 1e9,
+        f1=args.f1 * 1e9,
+        ramp_time=args.ramp_time * 1e-3,
+        kind=getattr(args, "type", "triangle"),
+    )
 
 
 def _sim_options(p, seed=0):
@@ -256,6 +395,7 @@ def parser():
     _sim_options(p)
     _imaging_options(p, "none", "hann")
     p.set_defaults(func=_demo)
+    _add_hardware(sub)
     _add_calib(sub)
     return ap
 
@@ -264,7 +404,7 @@ def main(argv=None):
     args = parser().parse_args(argv)
     try:
         return args.func(args)
-    except NotImplementedError as e:
+    except (NotImplementedError, DeviceError) as e:
         print(f"qmrdk: {e}", file=sys.stderr)
         return 2
 

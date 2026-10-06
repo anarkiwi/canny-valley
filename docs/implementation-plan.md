@@ -140,6 +140,10 @@ and leaves the RF off.
 Exit: device-layer tests pass against the simulator; the same test module
 passes against hardware when run with a hardware marker.
 
+Status: delivered as `transport.py`, `device.py` and `sim/scpi.py`
+([driver.md](driver.md)). The hardware run of `tests/test_hardware.py` is
+pending.
+
 ### Phase 2 — capture and recordings
 
 * `capture.py` state machine with validation, timeout and recovery.
@@ -151,6 +155,9 @@ passes against hardware when run with a hardware marker.
 Exit: simulated multi-capture recording round-trips bit-exact; fault
 injection tests (truncated chunk, non-hex data, `Not Ready` beyond deadline,
 disconnect) recover or fail cleanly with RF off.
+
+Status: capture (in `device.py`), the synthetic IF source and `capture` are
+delivered and meet the exit criteria; vendor CSV and `export` are pending.
 
 ### Phase 3 — signal processing
 

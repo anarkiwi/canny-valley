@@ -13,7 +13,8 @@ from qmrdk.constants import C, FS_NOMINAL
 class Sweep:
     """Read-back sweep parameters of a capture.
 
-    `kind` is "triangle" (AUTO) or "cw". `ramp_time` is the one-way ramp time.
+    `kind` is the sweep type (protocol §3.1): "ramp" (0), "tri" (1),
+    "triangle" (2, AUTO) or "cw" (3). `ramp_time` is the one-way ramp time.
     """
 
     f0: float = 2.4e9
