@@ -139,6 +139,18 @@ def _mirror_score(x, n0, nr, guard):
     return float(np.sum(a * b) / np.sqrt(np.sum(a * a) * np.sum(b * b)))
 
 
+def _beat_line(spec, lobe, nu):
+    """Strongest line of the mean ramp spectrum `spec` beyond `lobe` bins (of
+    a ramp of `nu` samples) from zero range: bin and parabolic frequency."""
+    nfft = 2 * (spec.shape[-1] - 1)
+    mag = 20.0 * np.log10(np.abs(spec).mean(axis=0) + 1e-300)
+    peaks = find_peaks(mag)[0]
+    peaks = peaks[peaks >= int(np.ceil(lobe * nfft / nu))]
+    kp = int(peaks[np.argmax(mag[peaks])])
+    a, b, c = mag[kp - 1 : kp + 2]
+    return kp, 2.0 * np.pi * (kp + 0.5 * (a - c) / (a - 2.0 * b + c)) / nfft
+
+
 def _turnarounds(spec, kp, omega, n0, nr, turn):
     """Turnarounds where the ramps either side carry equal phase at bin `kp`."""
     z = spec[..., kp]
@@ -170,13 +182,7 @@ def estimate_timing(
             if j.size < 3:
                 raise ValueError("timing needs at least three complete ramps")
             spec = range_spectrum(ramps, window)
-            nfft = 2 * (spec.shape[-1] - 1)
-            mag = 20.0 * np.log10(np.abs(spec).mean(axis=0) + 1e-300)
-            peaks = find_peaks(mag)[0]
-            peaks = peaks[peaks >= int(np.ceil(lobe * nfft / ramps.shape[-1]))]
-            kp = int(peaks[np.argmax(mag[peaks])])
-            a, b, c = mag[kp - 1 : kp + 2]
-            omega = 2.0 * np.pi * (kp + 0.5 * (a - c) / (a - 2.0 * b + c)) / nfft
+            kp, omega = _beat_line(spec, lobe, ramps.shape[-1])
             turn = j[1:].astype(np.float64)
             nk = _turnarounds(spec, kp, omega, n0, nr, turn)
             design = np.column_stack([np.ones_like(turn), turn])
@@ -211,6 +217,23 @@ def estimate_timing(
         noise_var=noise_var,
         frames=k_frames,
     )
+
+
+def pair_phase(
+    first, second, sweep, fs_nominal=FS_NOMINAL, guard=INTERP_HALF_WIDTH, window="hann"
+):
+    """Phase change (deg) of the step 1 beat line between the mean frames of
+    two static sets, referenced to the first ramp; the up and down ramps
+    move in opposite directions."""
+    t = estimate_timing(first, sweep, fs_nominal, guard, window)
+    x = np.stack([_frame_stats(s)[0] for s in (first, second)])
+    ramps, j = _centred_ramps(x, t.n0, t.nr, guard)
+    spec = range_spectrum(ramps, window)
+    nu = ramps.shape[-1]
+    kp = _beat_line(spec[0], window_lobes(window, nu)[0], nu)[0]
+    z = spec[1, :, kp] * spec[0, :, kp].conj()
+    z = np.where((j - j[0]) % 2, z.conj(), z).sum()
+    return float(180.0 - np.mod(180.0 - np.degrees(np.angle(z)), 360.0))
 
 
 @dataclasses.dataclass
@@ -974,10 +997,12 @@ def _load_frames(path):
         return f["codes"], Sweep(**json.loads(str(f["sweep"])))
 
 
-def _static(args, radar, sled, geometry, target):
+def _static(args, radar, sled, geometry, target, cal):
     """Static frames and their sweep: from `--frames-file` if it exists, else
     captured (as a pair `dx` apart with a sled, a single set without) and
-    saved there. With `--pair`, the set in that file is the first of a pair."""
+    saved there. With `--pair`, the set in that file is the first of a pair;
+    a capture is refused unless the beat line's phase has moved by 90 deg."""
+    first = _load_frames(args.pair) if args.pair else None
     if _recorded(args):
         codes, sweep = _load_frames(args.frames_file)
     else:
@@ -985,15 +1010,23 @@ def _static(args, radar, sled, geometry, target):
         if sled is not None:
             sled.home()
             dx = pair_step(radar.sweep, geometry, target, 0.0, args.length)
+        if first is not None:
+            check = capture_frames(radar, args.n, args.check_frames, "pair check")
+            phi = pair_phase(first[0], check, radar.sweep, cal.fs)
+            print(f"pair phase change {phi:.0f} deg", file=sys.stderr)
+            if abs(phi) < 90.0:
+                raise ValueError(
+                    f"pair phase change {phi:.0f} deg is below 90 deg: move the "
+                    "radar again, about 3 cm towards the reflector"
+                )
         codes, sweep = run_timing(radar, args.n, args.frames, sled, dx), radar.sweep
         if args.frames_file:
             meta = json.dumps(dataclasses.asdict(sweep))
             np.savez_compressed(args.frames_file, codes=codes, sweep=meta)
-    if args.pair:
-        first, first_sweep = _load_frames(args.pair)
-        if first_sweep != sweep or first.shape != codes.shape:
+    if first is not None:
+        if first[1] != sweep or np.shape(first[0]) != codes.shape:
             raise ValueError(f"{args.pair} does not match the second frame set")
-        codes = np.stack([first, codes])
+        codes = np.stack([first[0], codes])
     return codes, sweep
 
 
@@ -1004,8 +1037,10 @@ def _baseline(args, cal):
 _STATIC = ("timing", "guard")
 
 _STEPS = {
-    "timing": lambda a, r, s, g, t, c: estimate_timing(*_static(a, r, s, g, t), c.fs),
-    "guard": lambda a, r, s, g, t, c: estimate_guard(*_static(a, r, s, g, t), c),
+    "timing": lambda a, r, s, g, t, c: estimate_timing(
+        *_static(a, r, s, g, t, c), c.fs
+    ),
+    "guard": lambda a, r, s, g, t, c: estimate_guard(*_static(a, r, s, g, t, c), c),
     "reflector": lambda a, r, s, g, t, c: estimate_reflector(
         run_reflector(r, s, g, t, a.length, a.n), r.sweep, c, g, t, _baseline(a, c)
     ),
@@ -1033,6 +1068,10 @@ _ARGS = (
     ("--report", {"help": "write the JSON report here"}),
     ("--n", {"type": int, "default": 4096, "help": "samples per frame"}),
     ("--frames", {"type": int, "default": 32, "help": "static frames per position"}),
+    (
+        "--check-frames",
+        {"type": int, "default": 16, "help": "frames for the --pair phase check"},
+    ),
     (
         "--target",
         {

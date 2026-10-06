@@ -5,8 +5,9 @@ QM-RDK 2.4 GHz FMCW/CW radar demonstration kit, replacing the vendor's
 Windows GUI and MATLAB scripts and adding rail SAR imaging.
 
 Control and data are over USB only; the board's Bluetooth link is not used.
-The USB device layer and the sled driver are not implemented yet; every
-command runs against the simulated board and scene with `--sim`.
+USB capture is implemented and `calib timing`/`calib guard` run on the
+board; the sled driver is not implemented, so scans and calibration steps 3
+and 4 run against the simulated board and scene with `--sim`.
 
 ## Install
 
@@ -24,6 +25,8 @@ qmrdk sar scan --sim --scene yard --out artifacts/scan.npz    # simulated scan r
 qmrdk sar image artifacts/scan.npz --cal cal.json --scene yard --out artifacts/scan.png
 qmrdk calib sim --cal cal.json                                # full calibration procedure on the simulated board
 qmrdk calib {timing,guard,reflector,repeat} --sim --cal cal.json
+qmrdk calib timing --frames-file A.npz                        # on the board, first position
+qmrdk calib timing --frames-file B.npz --pair A.npz --cal cal.json   # after moving the radar ~3 cm
 ```
 
 Sweep options `--f0`, `--f1` (GHz) and `--ramp-time` (ms) select the

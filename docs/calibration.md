@@ -55,6 +55,29 @@ and, through the IF high-pass, the mirror symmetry. The reflector's return
 remains, mirror-symmetric about every turnaround. A single frame set
 `[K, N]` is also accepted.
 
+Without a sled (steps 1 and 2 only), the pair is taken by moving the radar
+by hand:
+
+```
+qmrdk calib timing --frames-file A.npz                  # first position
+# move the radar about 3 cm straight towards the reflector
+qmrdk calib timing --frames-file B.npz --pair A.npz     # second position
+qmrdk calib guard --frames-file B.npz --pair A.npz      # reuses both sets
+```
+
+`--frames-file` reads the set if the file exists, else captures it and
+saves it there. What matters is the phase change `φ` of the reflector's
+line, not the distance moved: the difference keeps the line at
+`|1 - e^{jφ}|`, so a usable pair needs `90° ≤ |φ| ≤ 180°`, and a hand move
+does not reliably give it. Before capturing the second set, `--pair`
+captures `--check-frames` frames (default 16), reports `φ`
+(`calib.pair_phase`, against the first set's step 1 line) and refuses
+below 90°; move the radar again and repeat. In a real scene with strong
+near-range leakage use `--frames 512` per position, so the guard
+criterion's noise peak (step 2, item 5) is well below the PSL. A single
+static set without a pair keeps the leakage and near-range returns, which
+break the mirror symmetry; step 2 then fails.
+
 Estimation (`qmrdk.calib.estimate_timing`):
 
 1. Mean frame `x̄` over the `K` differences. Their spread gives the
