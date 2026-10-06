@@ -10,7 +10,6 @@ import types
 
 import numpy as np
 import pytest
-from fakeboard import FakeBoard, install
 from PIL import Image
 from sarscene import HW, SWEEP, tiny
 
@@ -19,6 +18,7 @@ from qmrdk.config import ScanGeometry
 from qmrdk.recording import Recording
 from qmrdk.sim.devices import SimRadar, SimSled
 from qmrdk.sim.scene import compile_scene
+from qmrdk.sim.scpi import SimBoard
 
 SMALL = ["--length", "0.3", "--n", "2048", "--gain", "2e3", "--seed", "1"]
 
@@ -72,18 +72,18 @@ def test_scan_hardware_unavailable(tmp_path, capsys):
     assert "use --sim" in capsys.readouterr().err
 
 
-def test_scan_hardware_path(tmp_path, monkeypatch):
+def test_scan_hardware_path(tmp_path, monkeypatch, attach):
     geom = compile_scene(tiny(), SWEEP.lam)
     sled = SimSled()
     radar = SimRadar(geom, HW, SWEEP, sled, ScanGeometry(1.5), seed=0)
-    board = install(monkeypatch, FakeBoard(radar.capture))
+    board = attach(SimBoard(source=lambda n, sweep: radar.capture(n)))
     monkeypatch.setattr(cli, "HardwareSled", lambda: sled)
     path = str(tmp_path / "hw.npz")
     argv = ["sar", "scan", "--out", path, "--length", "0.1", "--n", "1024"]
     assert cli.main(argv + ["--height", "1.5"]) == 0
     rec = Recording.load(path)
     assert rec.codes.shape == (5, 1024) and rec.geometry.height == 1.5
-    assert rec.sweep == SWEEP and board.closed and not board.sweeping
+    assert rec.sweep == SWEEP and not board.rf and not board.sweeping
 
 
 def test_clipping_warning(capsys):

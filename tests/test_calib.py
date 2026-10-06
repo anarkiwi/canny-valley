@@ -12,7 +12,6 @@ import pathlib
 
 import numpy as np
 import pytest
-from fakeboard import FakeBoard, install
 from scipy import signal, stats
 
 from qmrdk import calib
@@ -24,6 +23,7 @@ from qmrdk.recording import Recording
 from qmrdk.scan import frames as capture_frames
 from qmrdk.sim.hardware import Hardware, synthesize, synthesize_volts
 from qmrdk.sim.propagation import Paths
+from qmrdk.sim.scpi import SimBoard
 
 SWEEP = Sweep()
 GEOM = ScanGeometry()
@@ -389,19 +389,19 @@ def test_pair_phase(quarters, expect):
 
 
 @pytest.fixture(name="board")
-def fixture_board(monkeypatch):
-    """Fake board serving simulated frames; its sled moves the radar."""
+def fixture_board(attach):
+    """Simulated board serving the scene's frames; its sled moves the radar."""
     radar, sled = calib.sim_devices(Hardware(), SWEEP, GEOM, TARGET, seed=5)
-    board = install(monkeypatch, FakeBoard(radar.capture))
+    board = attach(SimBoard(source=lambda n, sweep: radar.capture(n)))
     board.sled = sled
     return board
 
 
-def test_cli_hardware_pair(board, tmp_path, capsys, monkeypatch):
+def test_cli_hardware_pair(board, tmp_path, capsys, attach):
     a, b, rep = (str(tmp_path / f) for f in ("a.npz", "b.npz", "rep.json"))
     common = ["--frames", "8", "--check-frames", "4", "--report", rep]
     assert run_cli(["calib", "timing", "--frames-file", a, *common]) == 0
-    assert board.closed and board.log[-1] == "SWEEP:STOP"
+    assert not board.rf and board.log[-3:] == ["SWEEP:STOP", "SYST:ERR?", "POWE:RF?"]
     single = read_report(rep)["timing"]
     assert run_cli(["calib", "timing", "--frames-file", b, "--pair", a, *common]) == 2
     assert "move the radar again" in capsys.readouterr().err
@@ -413,7 +413,7 @@ def test_cli_hardware_pair(board, tmp_path, capsys, monkeypatch):
     assert paired["frames"] == single["frames"] == 8
     k = k_t(paired["turnarounds"] - 2)
     assert abs(paired["fs"] - Hardware().fs) <= k * paired["se_fs"]
-    install(monkeypatch)
+    attach()
     cal = str(tmp_path / "cal.json")
     for step in ("timing", "guard"):
         argv = ["calib", step, "--frames-file", b, "--pair", a, "--cal", cal]

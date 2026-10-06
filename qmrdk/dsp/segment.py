@@ -56,6 +56,19 @@ def mirror_turnaround(x, nr):
     return pos, j0
 
 
+def mirror_correlation(x, centres, offsets):
+    """Normalised correlation of `x[c + d]` with `x[c - d]` over `offsets` d,
+    for each integer centre c; each side has its mean removed."""
+    x = np.asarray(x, dtype=np.float64)
+    c = np.asarray(centres, dtype=np.int64)[:, None]
+    a, b = x[c + offsets], x[c - offsets]
+    a = a - a.mean(axis=-1, keepdims=True)
+    b = b - b.mean(axis=-1, keepdims=True)
+    den = np.sqrt(np.sum(a * a, axis=-1) * np.sum(b * b, axis=-1))
+    num = np.sum(a * b, axis=-1)
+    return np.divide(num, den, out=np.zeros_like(num), where=den > 0)
+
+
 def turnaround_positions(n0, nr, n):
     """Turnaround positions `n0 + k * nr` lying in `[0, n)`."""
     first = n0 + np.ceil(-n0 / nr) * nr
