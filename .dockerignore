@@ -1,0 +1,5 @@
+.git
+.worktrees
+artifacts
+untracked
+**/__pycache__

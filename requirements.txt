@@ -1,0 +1,10 @@
+numpy==2.5.3
+scipy==1.18.1
+numba==0.68.0
+finufft==2.5.1
+matplotlib==3.11.2
+pillow==12.3.0
+tqdm==4.70.1
+pyvisa==1.16.2
+pyvisa-py==0.8.1
+pyusb==1.3.1

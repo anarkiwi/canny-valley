@@ -1,0 +1,25 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          tags: qmrdk:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: format
+        run: docker run --rm qmrdk:ci black --check .
+      - name: lint
+        run: docker run --rm qmrdk:ci pylint qmrdk tests tools
+      - name: test
+        run: docker run --rm qmrdk:ci pytest -n auto --cov=qmrdk --cov-report=term-missing --cov-fail-under=85
