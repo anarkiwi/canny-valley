@@ -47,7 +47,9 @@ Messages travel on one bulk-OUT and one bulk-IN endpoint with USBTMC framing:
   size, attribute byte, 3 reserved bytes; payload padded to a 4-byte boundary.
 * Device clear uses the USBTMC `INITIATE_CLEAR` / `CHECK_CLEAR_STATUS` control
   requests. On the device it aborts pending operations, resets the parser and
-  empties the output buffer (M).
+  empties the output buffer (M). pyvisa-py does not implement it
+  (`VI_ERROR_NSUP_OPER`, H); the host instead discards pending frame data by
+  reading `CAPT:FRAM?` until `Not Ready`.
 
 USBTMC framing is delegated to PyVISA with the pyvisa-py backend (pyusb /
 libusb); it is not reimplemented.
@@ -61,6 +63,9 @@ libusb); it is not reimplemented.
   this VID. pyvisa-py detaches it automatically when it has permission (H).
 * In a container the USB bus must be passed through (`/dev/bus/usb` plus the
   `c 189:* rmw` device cgroup rule) so re-enumeration after reset survives.
+  `*RST` reboots the board: it disconnects from USB and re-enumerates with a
+  new device number (H), so the new `/dev/bus/usb` node must exist in the
+  container (a bind mount of the host's `/dev/bus/usb`, not a single device).
 
 ### Discovery
 
@@ -140,7 +145,7 @@ actively capturing: session close, error paths and signal handlers send
 
 | Command | Query | Meaning | Range | Tag |
 |---------|-------|---------|-------|-----|
-| — | `FREQ:LOCK?` | PLL lock: 1 locked, 0 unlocked | — | M |
+| — | `FREQ:LOCK?` | PLL lock: 1 locked, 0 unlocked | — | M, H |
 | `FREQ:REF:DIV <n>` | `FREQ:REF:DIV?` | reference divider | 1 – 256 | M |
 
 The synthesizer steps frequency from a 20 MHz reference with a 25-bit
@@ -154,6 +159,10 @@ T_max     = (f_stop - f_start) / slope_min   [s]
 
 The host validates `ramp time <= T_max` before sending `SWEEP:RAMPTIME` and
 offers the smallest `refdiv` that satisfies a requested ramp time.
+
+`FREQ:LOCK?` can read 0 in every sweep type after power-up and recover only
+on a power cycle (H). The host refuses to capture unless it reads 1 after
+`SWEEP:START`.
 
 ### 3.4 Capture
 
@@ -214,8 +223,9 @@ Host capture procedure:
 3. Repeat `CAPT:FRAM?` until `n` samples are collected. Validate every
    response: length is a multiple of 4, at most 124, all characters
    hexadecimal, and the total never exceeds `n`.
-4. On any validation failure or timeout: device clear, `SYST:ERR?` drain,
-   discard the frame.
+4. On any validation failure or timeout: read `CAPT:FRAM?` until
+   `Not Ready` (in place of a device clear, §1), drain `SYST:ERR?`, discard
+   the frame and retry.
 
 There is no continuous streaming over USB. Consecutive frames are separated
 by the read-out time (`ceil(n/31)` request/response round trips) and are
@@ -294,7 +304,7 @@ particular is factory calibration and is never sent, including by the probe.
 Connect:
 
 ```
-device clear
+CAPT:FRAM? until Not Ready  (discard pending frame data)
 *IDN?                      -> identify, record serial and firmware
 *CLS
 SYST:ERR?                  -> expect 0

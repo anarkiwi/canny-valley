@@ -8,17 +8,20 @@ standard errors, `CHI2_3` the 99.9 % chi-square quantile for the joint
 import argparse
 import dataclasses
 import json
+import pathlib
 
 import numpy as np
 import pytest
+from fakeboard import FakeBoard, install
 from scipy import signal, stats
 
 from qmrdk import calib
 from qmrdk.config import Calibration, ScanGeometry, Sweep
-from qmrdk.constants import C
+from qmrdk.constants import FS_NOMINAL, C
 from qmrdk.dsp.range import range_spectrum
 from qmrdk.dsp.segment import interpolation_matrix, ramp_length
 from qmrdk.recording import Recording
+from qmrdk.scan import frames as capture_frames
 from qmrdk.sim.hardware import Hardware, synthesize, synthesize_volts
 from qmrdk.sim.propagation import Paths
 
@@ -357,6 +360,76 @@ def test_cli_without_sim_reports_device_error(step, capsys, monkeypatch):
 
 def _raise(*_args, **_kwargs):
     raise NotImplementedError("no device")
+
+
+def static_sets(moves, frames=8):
+    """Static sets of the simulated board at sled positions `moves` (m)."""
+    hw = Hardware()
+    radar, sled = calib.sim_devices(hw, SWEEP, GEOM, TARGET, seed=3)
+    out = []
+    for x in moves:
+        sled.move_to(x)
+        out.append(capture_frames(radar, 4096, frames))
+    return np.stack(out)
+
+
+def read_report(path):
+    return json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("quarters, expect", [(1.0, 180.0), (0.5, 90.0), (0.0, 0.0)])
+def test_pair_phase(quarters, expect):
+    dx = quarters * calib.pair_step(SWEEP, GEOM, TARGET)
+    a, b = static_sets([0.0, dx])
+    phi = calib.pair_phase(a, b, SWEEP, FS_NOMINAL)
+    assert -180.0 < phi <= 180.0
+    assert abs(abs(phi) - expect) < 10.0
+    back = calib.pair_phase(b, a, SWEEP, FS_NOMINAL)
+    assert abs(np.mod(back + phi + 180.0, 360.0) - 180.0) < 5.0
+
+
+@pytest.fixture(name="board")
+def fixture_board(monkeypatch):
+    """Fake board serving simulated frames; its sled moves the radar."""
+    radar, sled = calib.sim_devices(Hardware(), SWEEP, GEOM, TARGET, seed=5)
+    board = install(monkeypatch, FakeBoard(radar.capture))
+    board.sled = sled
+    return board
+
+
+def test_cli_hardware_pair(board, tmp_path, capsys, monkeypatch):
+    a, b, rep = (str(tmp_path / f) for f in ("a.npz", "b.npz", "rep.json"))
+    common = ["--frames", "8", "--check-frames", "4", "--report", rep]
+    assert run_cli(["calib", "timing", "--frames-file", a, *common]) == 0
+    assert board.closed and board.log[-1] == "SWEEP:STOP"
+    single = read_report(rep)["timing"]
+    assert run_cli(["calib", "timing", "--frames-file", b, "--pair", a, *common]) == 2
+    assert "move the radar again" in capsys.readouterr().err
+    assert not pathlib.Path(b).exists()
+    board.sled.move_to(calib.pair_step(SWEEP, GEOM, TARGET))
+    assert run_cli(["calib", "timing", "--frames-file", b, "--pair", a, *common]) == 0
+    assert "pair phase change" in capsys.readouterr().err
+    paired = read_report(rep)["timing"]
+    assert paired["frames"] == single["frames"] == 8
+    k = k_t(paired["turnarounds"] - 2)
+    assert abs(paired["fs"] - Hardware().fs) <= k * paired["se_fs"]
+    install(monkeypatch)
+    cal = str(tmp_path / "cal.json")
+    for step in ("timing", "guard"):
+        argv = ["calib", step, "--frames-file", b, "--pair", a, "--cal", cal]
+        assert run_cli(argv + common) == 0
+    assert read_report(rep)["guard"]["frames"] == 8
+    assert run_cli(["calib", "timing", "--frames-file", a, *common]) == 0
+    assert read_report(rep)["timing"] == single
+
+
+def test_cli_hardware_pair_mismatch(board, tmp_path, capsys):
+    a, b = str(tmp_path / "a.npz"), str(tmp_path / "b.npz")
+    assert run_cli(["calib", "guard", "--frames-file", a, "--frames", "4"]) == 0
+    assert run_cli(["calib", "guard", "--frames-file", b, "--frames", "6"]) == 0
+    assert board.log.count("SWEEP:STOP") == 2
+    assert run_cli(["calib", "guard", "--frames-file", b, "--pair", a]) == 2
+    assert "does not match" in capsys.readouterr().err
 
 
 def test_recording_round_trip(alt_scan, tmp_path):

@@ -10,6 +10,7 @@ import types
 
 import numpy as np
 import pytest
+from fakeboard import FakeBoard, install
 from PIL import Image
 from sarscene import HW, SWEEP, tiny
 
@@ -75,13 +76,14 @@ def test_scan_hardware_path(tmp_path, monkeypatch):
     geom = compile_scene(tiny(), SWEEP.lam)
     sled = SimSled()
     radar = SimRadar(geom, HW, SWEEP, sled, ScanGeometry(1.5), seed=0)
-    monkeypatch.setattr(cli, "UsbRadar", lambda: radar)
+    board = install(monkeypatch, FakeBoard(radar.capture))
     monkeypatch.setattr(cli, "HardwareSled", lambda: sled)
     path = str(tmp_path / "hw.npz")
     argv = ["sar", "scan", "--out", path, "--length", "0.1", "--n", "1024"]
     assert cli.main(argv + ["--height", "1.5"]) == 0
     rec = Recording.load(path)
     assert rec.codes.shape == (5, 1024) and rec.geometry.height == 1.5
+    assert rec.sweep == SWEEP and board.closed and not board.sweeping
 
 
 def test_clipping_warning(capsys):

@@ -63,9 +63,10 @@ def _scan(args):
     if args.sim:
         _, rec = _sim_scan(_scene(args.scene), sweep, geometry, args, _board(args))
     else:
-        radar, sled = UsbRadar(), HardwareSled()
+        sled = HardwareSled()
         positions = scan_positions(sweep, args.length, args.dx)
-        rec = run_scan(radar, sled, positions, args.n, geometry)
+        with UsbRadar(sweep=sweep) as radar:
+            rec = run_scan(radar, sled, positions, args.n, geometry)
     _clipping(rec.codes, args.out)
     rec.save(args.out)
     print(f"{args.out}: {rec.codes.shape[0]} positions")
