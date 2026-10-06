@@ -2,6 +2,7 @@
 
 # pylint: disable=too-many-lines
 
+import contextlib
 import dataclasses
 import json
 import math
@@ -914,7 +915,7 @@ def calibrate_sim(
 def run_step(args):
     """Handler of every `calib` command: run the step, update `--cal`, report."""
     # pylint: disable=import-outside-toplevel
-    from qmrdk.radar import HardwareSled, UsbRadar
+    from qmrdk.radar import DeviceError, HardwareSled, UsbRadar
     from qmrdk.sim.hardware import Hardware
 
     path = pathlib.Path(args.cal) if args.cal else None
@@ -936,17 +937,21 @@ def run_step(args):
                 args.sled_sigma,
             )
         else:
-            if args.sim:
-                hw = Hardware()
-                radar, sled = sim_devices(
-                    hw, Sweep(), geometry, target, args.seed, args.sled_sigma
-                )
-                cal = cal if path and path.is_file() else nominal(hw)
-            else:
-                radar, sled = UsbRadar(), HardwareSled()
-            res = _STEPS[step](args, radar, sled, geometry, target, cal)
+            with contextlib.ExitStack() as stack:
+                if args.sim:
+                    hw = Hardware()
+                    radar, sled = sim_devices(
+                        hw, Sweep(), geometry, target, args.seed, args.sled_sigma
+                    )
+                    cal = cal if path and path.is_file() else nominal(hw)
+                elif step in _STATIC and _recorded(args):
+                    radar, sled = None, None
+                else:
+                    sled = None if step in _STATIC else HardwareSled()
+                    radar = stack.enter_context(UsbRadar(sweep=Sweep()))
+                res = _STEPS[step](args, radar, sled, geometry, target, cal)
             cal, report = res.apply(cal), {step: res.summary()}
-    except (NotImplementedError, ValueError) as exc:
+    except (NotImplementedError, ValueError, DeviceError) as exc:
         print(f"qmrdk calib: {exc}", file=sys.stderr)
         return 2
     report = _floats(report)
@@ -960,28 +965,47 @@ def run_step(args):
     return 0
 
 
+def _recorded(args):
+    return args.frames_file and pathlib.Path(args.frames_file).is_file()
+
+
+def _load_frames(path):
+    with np.load(path) as f:
+        return f["codes"], Sweep(**json.loads(str(f["sweep"])))
+
+
 def _static(args, radar, sled, geometry, target):
-    sled.home()
-    return run_timing(
-        radar,
-        args.n,
-        args.frames,
-        sled,
-        pair_step(radar.sweep, geometry, target, 0.0, args.length),
-    )
+    """Static frames and their sweep: from `--frames-file` if it exists, else
+    captured (as a pair `dx` apart with a sled, a single set without) and
+    saved there. With `--pair`, the set in that file is the first of a pair."""
+    if _recorded(args):
+        codes, sweep = _load_frames(args.frames_file)
+    else:
+        dx = None
+        if sled is not None:
+            sled.home()
+            dx = pair_step(radar.sweep, geometry, target, 0.0, args.length)
+        codes, sweep = run_timing(radar, args.n, args.frames, sled, dx), radar.sweep
+        if args.frames_file:
+            meta = json.dumps(dataclasses.asdict(sweep))
+            np.savez_compressed(args.frames_file, codes=codes, sweep=meta)
+    if args.pair:
+        first, first_sweep = _load_frames(args.pair)
+        if first_sweep != sweep or first.shape != codes.shape:
+            raise ValueError(f"{args.pair} does not match the second frame set")
+        codes = np.stack([first, codes])
+    return codes, sweep
 
 
 def _baseline(args, cal):
     return args.baseline or float(abs(cal.rx_offset[0] - cal.tx_offset[0]))
 
 
+_STATIC = ("timing", "guard")
+
 _STEPS = {
-    "timing": lambda a, r, s, g, t, c: estimate_timing(
-        _static(a, r, s, g, t), r.sweep, c.fs
-    ),
-    "guard": lambda a, r, s, g, t, c: estimate_guard(
-        _static(a, r, s, g, t), r.sweep, c
-    ),
+    "timing": lambda a, r, s, g, t, c: estimate_timing(*_static(a, r, s, g, t), c.fs),
+    "guard": lambda a, r, s, g, t, c: estimate_guard(*_static(a, r, s, g, t), c),
     "reflector": lambda a, r, s, g, t, c: estimate_reflector(
         run_reflector(r, s, g, t, a.length, a.n), r.sweep, c, g, t, _baseline(a, c)
     ),
@@ -1017,6 +1041,14 @@ _ARGS = (
             "metavar": ("X", "Y", "Z"),
             "help": "reflector phase centre, m",
         },
+    ),
+    (
+        "--frames-file",
+        {"help": "static frames .npz: read if present, else captured and saved"},
+    ),
+    (
+        "--pair",
+        {"help": "static frames .npz of the first position; this set is the second"},
     ),
     ("--baseline", {"type": float, "help": "tx-rx aperture separation, m"}),
     ("--length", {"type": float, "default": 1.5, "help": "scan length, m"}),
