@@ -362,9 +362,8 @@ def _raise(*_args, **_kwargs):
     raise NotImplementedError("no device")
 
 
-def static_sets(moves, frames=8):
-    """Static sets of the simulated board at sled positions `moves` (m)."""
-    hw = Hardware()
+def static_sets(moves, frames=8, hw=Hardware()):
+    """Static sets of the simulated board `hw` at sled positions `moves` (m)."""
     radar, sled = calib.sim_devices(hw, SWEEP, GEOM, TARGET, seed=3)
     out = []
     for x in moves:
@@ -438,3 +437,72 @@ def test_recording_round_trip(alt_scan, tmp_path):
     assert Recording.load(tmp_path / "r.npz").extra["target"] == pytest.approx(
         list(TARGET)
     )
+
+
+def sled_range(x):
+    return float(np.linalg.norm(np.asarray(TARGET) - [x, 0.0, GEOM.height]))
+
+
+@pytest.mark.parametrize("truths", [UP, ALT])
+@pytest.mark.parametrize("towards", [True, False])
+def test_first_up_from_small_move(truths, towards):
+    hw = Hardware(**truths)
+    dx = calib.pair_step(SWEEP, GEOM, TARGET, turns=calib.FIRST_UP_PAIR[2])
+    moves = [0.0, dx] if towards else [dx, 0.0]
+    sets = static_sets(moves, hw=hw)
+    dr = sled_range(moves[1]) - sled_range(moves[0])
+    assert (dr < 0) == towards
+    res = calib.estimate_first_up(sets, SWEEP, None, towards)
+    assert res.first_up == hw.first_up
+    assert res.drange == pytest.approx(dr, rel=0.05)
+    assert abs(res.n0 - phase_delay_n0(hw, sled_range(0.0))) < 1.0
+    assert calib.estimate_first_up(sets, SWEEP, None, not towards).first_up != (
+        hw.first_up
+    )
+    cal = hw.calibration(SWEEP)
+    assert calib.estimate_first_up(sets, SWEEP, cal, towards).first_up == hw.first_up
+    later = dataclasses.replace(cal, n0=cal.n0 + hw.nr(SWEEP))
+    res = calib.estimate_first_up(sets, SWEEP, later, towards)
+    assert res.first_up != hw.first_up and res.n0 == later.n0
+    assert res.apply(Calibration()).first_up == res.first_up
+    json.dumps(res.summary())
+
+
+@pytest.mark.parametrize("turns", [0.0, 0.25])
+def test_first_up_refuses_ambiguous_phase(turns):
+    dx = calib.pair_step(SWEEP, GEOM, TARGET, turns=turns) if turns else 0.0
+    sets = static_sets([0.0, dx])
+    with pytest.raises(ValueError, match="outside 20..150 deg.*1.0 cm"):
+        calib.estimate_first_up(sets, SWEEP)
+    with pytest.raises(ValueError, match="away from the reflector"):
+        calib.estimate_first_up(sets, SWEEP, towards=False)
+    with pytest.raises(ValueError, match="pair of frame sets"):
+        calib.estimate_first_up(sets[0], SWEEP)
+
+
+@pytest.mark.parametrize("away", [False, True])
+def test_cli_first_up_sim(tmp_path, away):
+    cal, rep = str(tmp_path / "cal.json"), str(tmp_path / "rep.json")
+    argv = ["calib", "first-up", "--sim", "--cal", cal, "--report", rep]
+    assert run_cli(argv + ["--frames", "4"] + ["--away"] * away) == 0
+    res = read_report(rep)["first-up"]
+    assert (res["drange"] > 0) == away
+    assert Calibration.load(cal).first_up == Hardware().first_up
+
+
+def test_cli_first_up_pair(board, tmp_path, capsys):
+    a, b, rep = (str(tmp_path / f) for f in ("a.npz", "b.npz", "rep.json"))
+    common = ["--frames", "4", "--check-frames", "4", "--report", rep]
+    argv = ["calib", "first-up", "--frames-file", b, "--pair", a, *common]
+    assert run_cli(["calib", "timing", "--frames-file", a, *common]) == 0
+    assert run_cli(argv) == 2
+    assert "outside 20..150 deg" in capsys.readouterr().err
+    board.sled.move_to(calib.pair_step(SWEEP, GEOM, TARGET))
+    assert run_cli(argv) == 2
+    assert not pathlib.Path(b).exists()
+    board.sled.move_to(calib.pair_step(SWEEP, GEOM, TARGET, turns=1 / 12))
+    assert run_cli(argv) == 0
+    assert read_report(rep)["first-up"]["first_up"] == Hardware().first_up
+    argv[3] = str(tmp_path / "c.npz")
+    assert run_cli(argv + ["--away"]) == 0
+    assert read_report(rep)["first-up"]["first_up"] != Hardware().first_up

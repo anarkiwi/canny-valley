@@ -68,3 +68,9 @@ def test_recording_without_positions(tmp_path):
     rec.save(tmp_path / "r.npz")
     back = Recording.load(tmp_path / "r.npz")
     assert back.x_pos is None and back.geometry is None and back.sweep.kind == "cw"
+    assert back.temperature is None
+    rec.temperature = np.array([30.0, 30.5, 31.25])
+    rec.save(tmp_path / "t.npz")
+    np.testing.assert_array_equal(
+        Recording.load(tmp_path / "t.npz").temperature, rec.temperature
+    )

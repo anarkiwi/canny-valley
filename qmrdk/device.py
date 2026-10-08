@@ -393,14 +393,27 @@ class Device:
         return self.capture_timed(n)[1]
 
     def capture_many(
-        self, n: int, count: int, desc: str = "capture"
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """`count` frames, [count, n] codes, and their host UNIX times."""
+        self,
+        n: int,
+        count: int,
+        desc: str = "capture",
+        interval: float = 0.0,
+        temperature: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+        """`count` frames, [count, n] codes, their host UNIX times and, with
+        `temperature`, the board temperature read before each frame (else
+        None). Frame starts are at least `interval` seconds apart."""
         codes = np.empty((count, n), dtype=np.uint16)
         t_host = np.empty(count)
+        temp = np.empty(count) if temperature else None
+        start = -math.inf
         for i in tqdm(range(count), desc=desc, unit="frame"):
+            time.sleep(max(0.0, start + interval - time.monotonic()))
+            start = time.monotonic()
+            if temp is not None:
+                temp[i] = self.temperature()
             t_host[i], codes[i] = self.capture_timed(n)
-        return codes, t_host
+        return codes, t_host, temp
 
     def _reopen_and_stop(self) -> None:
         """Stop the RF of a board that rebooted; an absent board is unpowered."""

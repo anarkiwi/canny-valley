@@ -94,3 +94,13 @@ def test_capture_round_trip(capsys, attach, tmp_path, kind):
     assert rec.extra["idn"]["serial"] == "0042" and rec.extra["ref_div"] == 1
     assert rec.extra["fs"] == 21_977.0 and rec.extra["resource"].startswith("USB0")
     assert not board.rf
+
+
+def test_capture_temperature(capsys, tmp_path):
+    out = tmp_path / "rec.npz"
+    argv = ["capture", "--sim", "--frames", "2", "--n", "64", "--out", str(out)]
+    assert run(capsys, *argv, "--temperature", "--interval", "0.05")[0] == 0
+    rec = Recording.load(out)
+    np.testing.assert_array_equal(rec.temperature, [31.25, 31.25])
+    assert rec.t_host[1] - rec.t_host[0] >= 0.05
+    assert run(capsys, *argv)[0] == 0 and Recording.load(out).temperature is None

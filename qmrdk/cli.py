@@ -12,7 +12,7 @@ from qmrdk.config import Calibration, ScanGeometry, Sweep
 from qmrdk.constants import ADC_MAX, FS_NOMINAL
 from qmrdk.device import SWEEP_TYPES, Device, DeviceError
 from qmrdk.dsp.sar import form_image
-from qmrdk.radar import HardwareSled, UsbRadar
+from qmrdk.radar import HardwareSled, ManualSled, UsbRadar
 from qmrdk.recording import Recording
 from qmrdk.render import (
     animate,
@@ -66,7 +66,7 @@ def _scan(args):
     if args.sim:
         _, rec = _sim_scan(_scene(args.scene), sweep, geometry, args, _board(args))
     else:
-        sled = HardwareSled()
+        sled = ManualSled() if args.manual else HardwareSled()
         positions = scan_positions(sweep, args.length, args.dx)
         with UsbRadar(sweep=sweep) as radar:
             rec = run_scan(radar, sled, positions, args.n, geometry)
@@ -183,6 +183,12 @@ def _demo(args):
     return 0
 
 
+def _drift(args):
+    from qmrdk.drift import run  # pylint: disable=C0415
+
+    return run(args)
+
+
 def _calib_unavailable(args):
     print(f"calib commands unavailable: {args.reason}", file=sys.stderr)
     return 1
@@ -274,14 +280,16 @@ def _scpi(args):
 def _capture(args):
     with _device(args) as dev:
         sweep = dev.configure(_sweep(args))
-        codes, t_host = dev.capture_many(args.n, args.frames)
+        codes, t_host, temp = dev.capture_many(
+            args.n, args.frames, interval=args.interval, temperature=args.temperature
+        )
         extra = {
             "idn": dataclasses.asdict(dev.idn),
             "resource": dev.transport.name,
             "ref_div": dev.settings().ref_div,
             "fs": FS_NOMINAL,
         }
-    Recording(codes, sweep, t_host, extra=extra).save(args.out)
+    Recording(codes, sweep, t_host, extra=extra, temperature=temp).save(args.out)
     _clipping(codes, args.out)
     print(f"{args.out}: {codes.shape[0]} frames of {codes.shape[1]} samples")
     return 0
@@ -327,6 +335,14 @@ def _add_hardware(sub):
     p.add_argument("--frames", type=int, default=1)
     p.add_argument("--n", type=int, default=4096, help="samples per frame")
     p.add_argument("--out", required=True, help="recording .npz")
+    p.add_argument(
+        "--interval", type=float, default=0.0, help="minimum s between frame starts"
+    )
+    p.add_argument(
+        "--temperature",
+        action="store_true",
+        help="read the board temperature before each frame",
+    )
     _hw_options(p, sweep=True)
     p.set_defaults(func=_capture)
 
@@ -376,7 +392,11 @@ def parser():
         dest="sar_command", required=True
     )
     p = sar.add_parser("scan", help="scan the rail into a recording")
-    p.add_argument("--sim", action="store_true", help="simulated radar and sled")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--sim", action="store_true", help="simulated radar and sled")
+    mode.add_argument(
+        "--manual", action="store_true", help="move the radar by hand when prompted"
+    )
     p.add_argument("--scene", default="yard", help="built-in scene name or JSON")
     p.add_argument("--out", required=True, help="recording .npz")
     _sim_options(p, seed=None)
@@ -398,6 +418,13 @@ def parser():
     _imaging_options(p, "none", "hann")
     p.set_defaults(func=_demo)
     _add_hardware(sub)
+    p = sub.add_parser("drift", help="phase drift of a static capture vs time, temp")
+    p.add_argument("recording", help="static capture .npz (qmrdk capture)")
+    p.add_argument("--cal", required=True, help="calibration JSON")
+    p.add_argument("--out", help="plot PNG")
+    p.add_argument("--report", help="write the JSON report here")
+    p.add_argument("--lines", type=int, default=3, help="strongest lines to track")
+    p.set_defaults(func=_drift)
     _add_calib(sub)
     return ap
 

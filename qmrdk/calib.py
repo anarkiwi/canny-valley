@@ -41,6 +41,8 @@ HP_ORDER = 4
 P_FALSE = 1e-3
 TARGET_RANGE = 8.0
 TARGET_ANGLE = 25.0
+TIMING_PAIR = (90.0, 180.0, 0.25)
+FIRST_UP_PAIR = (20.0, 150.0, 1.0 / 12.0)
 
 
 def _floats(d):
@@ -226,14 +228,92 @@ def pair_phase(
     two static sets, referenced to the first ramp; the up and down ramps
     move in opposite directions."""
     t = estimate_timing(first, sweep, fs_nominal, guard, window)
+    return _pair_line(first, second, t.n0, t.nr, guard, window)[0]
+
+
+def _pair_line(first, second, n0, nr, guard, window):
+    """`pair_phase` for turnarounds `n0 + j nr`, and the `j` of the ramp
+    (starting at turnaround `j`) the phase is referenced to. The line is the
+    strongest of the difference of the two sets, so returns that do not move
+    with the radar (internal reflections, leakage) are not chosen; without a
+    difference line above the noise (Rayleigh, `P_FALSE`) the change is 0."""
     x = np.stack([_frame_stats(s)[0] for s in (first, second)])
-    ramps, j = _centred_ramps(x, t.n0, t.nr, guard)
+    ramps, j = _centred_ramps(x, n0, nr, guard)
     spec = range_spectrum(ramps, window)
     nu = ramps.shape[-1]
-    kp = _beat_line(spec[0], window_lobes(window, nu)[0], nu)[0]
+    lobe = int(np.ceil(window_lobes(window, nu)[0] * 2 * (spec.shape[-1] - 1) / nu))
+    power = (np.abs(spec[1] - spec[0]) ** 2).mean(axis=0)[lobe:]
+    if power.max() < np.median(power) / np.log(2.0) * np.log(power.size / P_FALSE):
+        return 0.0, int(j[0])
+    kp = lobe + int(np.argmax(power))
     z = spec[1, :, kp] * spec[0, :, kp].conj()
     z = np.where((j - j[0]) % 2, z.conj(), z).sum()
-    return float(180.0 - np.mod(180.0 - np.degrees(np.angle(z)), 360.0))
+    return float(180.0 - np.mod(180.0 - np.degrees(np.angle(z)), 360.0)), int(j[0])
+
+
+def _check_pair(phi, sweep, check, towards=True):
+    """Refuse a line phase change `phi` (deg) outside `check = (lo, hi, turns)`
+    deg; the advice is a range change of `turns` wavelengths."""
+    lo, hi, turns = check
+    if not lo <= abs(phi) <= hi:
+        way = "towards" if towards else "away from"
+        raise ValueError(
+            f"pair phase change {phi:.0f} deg is outside {lo:.0f}..{hi:.0f} deg: "
+            f"move the radar again, about {100.0 * turns * sweep.lam:.1f} cm in "
+            f"total from the first position straight {way} the reflector"
+        )
+
+
+@dataclasses.dataclass
+class FirstUpResult:
+    """Direction of the ramp starting at `n0` from a small static move (step
+    3a): line phase change `phi` (deg) and the range change it implies (m)."""
+
+    first_up: bool
+    phi: float
+    drange: float
+    n0: float
+
+    def apply(self, cal):
+        return dataclasses.replace(cal, first_up=self.first_up)
+
+    def summary(self):
+        return _floats(dataclasses.asdict(self))
+
+
+def estimate_first_up(
+    frames,
+    sweep,
+    cal=None,
+    towards=True,
+    guard=INTERP_HALF_WIDTH,
+    window="hann",
+    check=FIRST_UP_PAIR,
+):
+    """`first_up` from static sets `[2, K, N]` taken before and after moving
+    the radar `towards` (or away from) the reflector by less than `lam / 4`.
+
+    An up ramp's line has phase `+2 pi f tau` (`-` on a down ramp), so it
+    turns the same way as the range changes. Timing is `cal`'s, or estimated
+    from the first set if `cal` holds the nominal `fs` and `n0`.
+    """
+    if np.ndim(frames) != 3:
+        raise ValueError("first_up needs a pair of frame sets (--pair)")
+    if cal is None or (cal.fs, cal.n0) == (Calibration.fs, Calibration.n0):
+        fs = FS_NOMINAL if cal is None else cal.fs
+        t = estimate_timing(frames[0], sweep, fs, guard, window)
+        n0, nr = t.n0, t.nr
+    else:
+        n0, nr = cal.n0, cal.nr(sweep)
+    phi, j0 = _pair_line(frames[0], frames[1], n0, nr, guard, window)
+    _check_pair(phi, sweep, check, towards)
+    up = (phi > 0.0) != towards
+    return FirstUpResult(
+        first_up=bool(up != (j0 % 2 == 1)),
+        phi=phi,
+        drange=math.copysign(abs(phi) / 720.0 * sweep.lam, -1.0 if towards else 1.0),
+        n0=float(n0),
+    )
 
 
 @dataclasses.dataclass
@@ -794,11 +874,11 @@ def estimate_repeatability(
     )
 
 
-def pair_step(sweep, geometry, target, x0=0.0, length=1.5):
-    """Sled step that changes the reflector's range by a quarter wavelength."""
+def pair_step(sweep, geometry, target, x0=0.0, length=1.5, turns=0.25):
+    """Sled step that changes the reflector's range by `turns` wavelengths."""
     p = np.asarray(target, dtype=np.float64) - [x0, 0.0, geometry.height]
     slope = abs(p[0]) / np.linalg.norm(p)
-    return float(min(sweep.lam / (4.0 * max(slope, 1e-12)), length))
+    return float(min(turns * sweep.lam / max(slope, 1e-12), length))
 
 
 def run_timing(radar, n=4096, frames=32, sled=None, dx=None):
@@ -997,11 +1077,12 @@ def _load_frames(path):
         return f["codes"], Sweep(**json.loads(str(f["sweep"])))
 
 
-def _static(args, radar, sled, geometry, target, cal):
+def _static(args, radar, sled, geometry, target, cal, check=TIMING_PAIR):
     """Static frames and their sweep: from `--frames-file` if it exists, else
     captured (as a pair `dx` apart with a sled, a single set without) and
     saved there. With `--pair`, the set in that file is the first of a pair;
-    a capture is refused unless the beat line's phase has moved by 90 deg."""
+    a capture is refused unless the beat line's phase change is in `check`
+    (`_check_pair`). `--away` reverses the move."""
     first = _load_frames(args.pair) if args.pair else None
     if _recorded(args):
         codes, sweep = _load_frames(args.frames_file)
@@ -1009,16 +1090,15 @@ def _static(args, radar, sled, geometry, target, cal):
         dx = None
         if sled is not None:
             sled.home()
-            dx = pair_step(radar.sweep, geometry, target, 0.0, args.length)
+            dx = pair_step(radar.sweep, geometry, target, 0.0, args.length, check[2])
+            if (target[0] > 0.0) == args.away:
+                sled.move_to(dx)
+                dx = -dx
         if first is not None:
-            check = capture_frames(radar, args.n, args.check_frames, "pair check")
-            phi = pair_phase(first[0], check, radar.sweep, cal.fs)
+            probe = capture_frames(radar, args.n, args.check_frames, "pair check")
+            phi = pair_phase(first[0], probe, radar.sweep, cal.fs)
             print(f"pair phase change {phi:.0f} deg", file=sys.stderr)
-            if abs(phi) < 90.0:
-                raise ValueError(
-                    f"pair phase change {phi:.0f} deg is below 90 deg: move the "
-                    "radar again, about 3 cm towards the reflector"
-                )
+            _check_pair(phi, radar.sweep, check, not args.away)
         codes, sweep = run_timing(radar, args.n, args.frames, sled, dx), radar.sweep
         if args.frames_file:
             meta = json.dumps(dataclasses.asdict(sweep))
@@ -1034,13 +1114,16 @@ def _baseline(args, cal):
     return args.baseline or float(abs(cal.rx_offset[0] - cal.tx_offset[0]))
 
 
-_STATIC = ("timing", "guard")
+_STATIC = ("timing", "guard", "first-up")
 
 _STEPS = {
     "timing": lambda a, r, s, g, t, c: estimate_timing(
         *_static(a, r, s, g, t, c), c.fs
     ),
     "guard": lambda a, r, s, g, t, c: estimate_guard(*_static(a, r, s, g, t, c), c),
+    "first-up": lambda a, r, s, g, t, c: estimate_first_up(
+        *_static(a, r, s, g, t, c, FIRST_UP_PAIR), c, not a.away
+    ),
     "reflector": lambda a, r, s, g, t, c: estimate_reflector(
         run_reflector(r, s, g, t, a.length, a.n), r.sweep, c, g, t, _baseline(a, c)
     ),
@@ -1057,6 +1140,7 @@ _STEPS = {
 _HELP = {
     "timing": "step 1: fs and n0 from static frame pairs",
     "guard": "step 2: turnaround guard ng",
+    "first-up": "step 3a: first_up from static sets before and after a small move",
     "reflector": "step 3: first_up, r_cal and antenna offsets",
     "repeat": "step 4: sled repeatability",
     "sim": "steps 1-4 on the simulated board",
@@ -1088,6 +1172,13 @@ _ARGS = (
     (
         "--pair",
         {"help": "static frames .npz of the first position; this set is the second"},
+    ),
+    (
+        "--away",
+        {
+            "action": "store_true",
+            "help": "the second set is further from the reflector, not closer",
+        },
     ),
     ("--baseline", {"type": float, "help": "tx-rx aperture separation, m"}),
     ("--length", {"type": float, "default": 1.5, "help": "scan length, m"}),

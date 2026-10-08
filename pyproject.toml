@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-xdist", "pytest-cov", "black", "pylint"]
+dev = ["pytest", "pytest-xdist", "pytest-cov", "black", "pylint", "allantools"]
 
 [project.scripts]
 qmrdk = "qmrdk.cli:main"

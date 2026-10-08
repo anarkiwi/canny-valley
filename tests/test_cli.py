@@ -4,6 +4,7 @@
 
 import importlib
 import importlib.util
+import io
 import json
 import sys
 import types
@@ -84,6 +85,18 @@ def test_scan_hardware_path(tmp_path, monkeypatch, attach):
     rec = Recording.load(path)
     assert rec.codes.shape == (5, 1024) and rec.geometry.height == 1.5
     assert rec.sweep == SWEEP and not board.rf and not board.sweeping
+
+
+def test_scan_manual(tmp_path, monkeypatch, attach, capsys):
+    attach(SimBoard(source=lambda n, sweep: np.full(n, 30000, np.uint16)))
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n" * 5))
+    path = str(tmp_path / "manual.npz")
+    argv = ["sar", "scan", "--manual", "--out", path, "--length", "0.1"]
+    assert cli.main(argv + ["--dx", "0.025", "--n", "64"]) == 0
+    np.testing.assert_allclose(Recording.load(path).x_pos, np.arange(5) * 0.025)
+    assert capsys.readouterr().err.count("Enter when placed") == 5
+    with pytest.raises(SystemExit):
+        cli.parser().parse_args(argv + ["--sim"])
 
 
 def test_clipping_warning(capsys):

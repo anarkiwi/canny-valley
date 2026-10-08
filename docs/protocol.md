@@ -340,6 +340,7 @@ Native recording: one compressed `.npz` per recording holding
 | `codes` | `uint16 [captures, samples]` | raw ADC codes |
 | `t_host` | `float64 [captures]` | host UNIX time at `CAPT:FRAM` |
 | `x_pos` | `float64 [captures]`, SAR scans only | sled position, m |
+| `temperature` | `float64 [captures]`, optional | `SYST:TEMP?` read before each `CAPT:FRAM`, °C |
 | `meta` | JSON string | start/stop frequency (GHz), ramp time (ms), sweep type, reference divider, sample rate, `*IDN?` fields, software version |
 
 Vendor CSV (import/export, for exchange with files saved by the Windows GUI)

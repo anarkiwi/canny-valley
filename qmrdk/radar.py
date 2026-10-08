@@ -1,6 +1,7 @@
 """Acquisition interfaces. The simulated implementations are in qmrdk.sim;
 hardware implementations sit behind the same interfaces."""
 
+import sys
 from typing import Protocol
 
 import numpy as np
@@ -11,6 +12,7 @@ from qmrdk.device import Device, DeviceError, Idn, decode_chunk, ref_divider
 __all__ = [
     "DeviceError",
     "HardwareSled",
+    "ManualSled",
     "Radar",
     "Sled",
     "UsbRadar",
@@ -84,3 +86,35 @@ class HardwareSled:
         raise NotImplementedError(
             f"sled controller interface not documented (port {port!r}); use --sim"
         )
+
+
+class ManualSled:
+    """The Sled protocol by hand: `move_to` asks the operator (on `out`) to
+    place the sled reference at the rail position along the tape from home and
+    waits for Enter (`prompt`, default `input`); a repeated position is not
+    asked again."""
+
+    def __init__(self, prompt=input, out=None):
+        self._prompt = prompt
+        self._out = sys.stderr if out is None else out
+        self._x = None
+
+    def home(self) -> None:
+        self.move_to(0.0)
+
+    def move_to(self, x: float) -> None:
+        x = float(x)
+        if x == self._x:
+            return
+        step = "" if self._x is None else f", {(x - self._x) * 1e3:+.1f} mm from here"
+        print(
+            f"place the radar reference at {x:.4f} m = {x * 1e2:.2f} cm = "
+            f"{x * 1e3:.1f} mm from home{step}; Enter when placed",
+            file=self._out,
+            flush=True,
+        )
+        self._prompt("")
+        self._x = x
+
+    def position(self) -> float:
+        return 0.0 if self._x is None else self._x
