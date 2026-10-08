@@ -184,8 +184,7 @@ against hardware manually.
 
 * `dsp/sar.py` per signal-processing §11, verified on synthetic scans.
 * `sled.py` interface with a simulated sled; the driver for the kit's custom
-  sled controller is written once its interface is documented in
-  `docs/sled.md` (pending from the owner).
+  sled controller is documented in `docs/sled.md`.
 * `scan.py` sequencer and CLI `sar scan`, `sar image`; scan recordings add a
   per-capture `x_pos` field.
 
@@ -218,6 +217,5 @@ reflector focuses at its surveyed position.
 | Low frame rate from 31-sample paging limits time-history products | measure in phase 0; sample count per capture is the user-facing trade-off |
 | Transmitter left on after a crash | RF-off on every exit path in `device.py`; `qmrdk rf off` always available |
 | Kernel `usbtmc` driver holds the interface | udev rule and documented unbind; confirmed in phase 0 |
-| Sled controller interface not yet documented | SAR processing and sequencer developed against the simulated sled; only the driver depends on it |
 | SAR needs ramp direction and sub-sample alignment across positions | firmware timing if phase 0 finds it; otherwise the sharpness test and fractional alignment in the spec |
 | Board operates in the 2.4 GHz ISM band alongside Wi-Fi and Bluetooth | `info` reports lock state; ambient check procedure (receive with TX terminated) documented |

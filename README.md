@@ -14,8 +14,9 @@ focusing from range rings to resolved targets as the aperture grows.
 Control and data are over USB only; the board's Bluetooth link is not used.
 The USB driver ([docs/driver.md](docs/driver.md)) configures, captures and
 keeps the RF off outside captures; every board command also runs against a
-simulated board with `--sim`. The sled driver is not implemented, so scans
-and calibration steps 3 and 4 run against the simulated board and scene.
+simulated board with `--sim`. The sled driver ([docs/sled.md](docs/sled.md))
+steps the radar along the rail for scans and calibration steps 3 and 4, on
+hardware or against the simulated board and scene.
 
 ## Install
 
@@ -38,6 +39,7 @@ qmrdk capture --frames 1200 --interval 1 --temperature --out artifacts/static.np
 qmrdk drift artifacts/static.npz --cal cal.json --out artifacts/drift.png   # phase drift vs time and temperature
 qmrdk sar demo --scene yard --out artifacts/yard.png          # simulated scan, calibration, animated truth vs SAR
 qmrdk sar scan --sim --scene yard --out artifacts/scan.npz    # simulated scan recording
+qmrdk sar scan --length 1.5 --out artifacts/scan.npz          # board on USB, sled controller ($QMRDK_SLED or USB id)
 qmrdk sar scan --manual --length 1.5 --out artifacts/scan.npz # board on USB, radar moved by hand when prompted
 qmrdk sar image artifacts/scan.npz --cal cal.json --scene yard --out artifacts/scan.png
 qmrdk calib sim --cal cal.json                                # full calibration procedure on the simulated board
@@ -55,6 +57,7 @@ simulated sweep. Scenes are JSON files; built-in scenes are in
 * [Implementation plan](docs/implementation-plan.md)
 * [USB control protocol](docs/protocol.md)
 * [USB driver](docs/driver.md)
+* [Sled controller](docs/sled.md)
 * [Signal processing](docs/signal-processing.md)
 * [Simulation model](docs/simulation.md)
 * [Calibration procedure](docs/calibration.md)

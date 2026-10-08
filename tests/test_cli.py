@@ -70,7 +70,7 @@ def test_image_needs_positions(tmp_path, capsys):
 
 def test_scan_hardware_unavailable(tmp_path, capsys):
     assert cli.main(["sar", "scan", "--out", str(tmp_path / "s.npz")]) == 2
-    assert "use --sim" in capsys.readouterr().err
+    assert "sled controller not found" in capsys.readouterr().err
 
 
 def test_scan_hardware_path(tmp_path, monkeypatch, attach):
@@ -78,13 +78,15 @@ def test_scan_hardware_path(tmp_path, monkeypatch, attach):
     sled = SimSled()
     radar = SimRadar(geom, HW, SWEEP, sled, ScanGeometry(1.5), seed=0)
     board = attach(SimBoard(source=lambda n, sweep: radar.capture(n)))
-    monkeypatch.setattr(cli, "HardwareSled", lambda: sled)
+    opened = []
+    monkeypatch.setattr(cli, "HardwareSled", lambda *a: opened.append(a) or sled)
     path = str(tmp_path / "hw.npz")
     argv = ["sar", "scan", "--out", path, "--length", "0.1", "--n", "1024"]
     assert cli.main(argv + ["--height", "1.5"]) == 0
     rec = Recording.load(path)
     assert rec.codes.shape == (5, 1024) and rec.geometry.height == 1.5
     assert rec.sweep == SWEEP and not board.rf and not board.sweeping
+    assert opened == [(None, 0.05, 0.3)]
 
 
 def test_scan_manual(tmp_path, monkeypatch, attach, capsys):

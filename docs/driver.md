@@ -10,6 +10,7 @@ Host driver for the QM-RDK board over USB, implementing
 | `qmrdk/transport.py` | The only module that opens USB resources. Discovery (vendor ID `0x2012`, any product ID, `*IDN?` of the form `Quonset Microwave,QM4004,<serial>,<firmware>`, optional serial number), `write` / `query` with LF termination and per-call timeout, the §3.7 error policy (`SYST:ERR?` drained after every setter, non-zero raises `ScpiError` with code and text, `-500 Power on` consumed), frame flush (`CAPT:FRAM?` until `Not Ready`, in place of device clear), reopen by serial number after re-enumeration. Refuses every command outside the documented set (protocol §3.8), including `CAPT:STRE`. |
 | `qmrdk/device.py` | `Device`: typed commands over a `Transport`. `identify`, `settings` (read-back `Sweep`, reference divider, RF, lock), `configure` with host-side validation, `start` / `stop` / `rf`, `temperature`, `status`, `errors`, `reset`, `save` / `recall` / `restore_factory`, `capture` / `capture_many`, guarded `scpi` passthrough. |
 | `qmrdk/radar.py` | `UsbRadar`: the `Radar` protocol (`sweep`, `capture(n)`) over a `Device`, used by scans and calibration. `ManualSled`: the `Sled` protocol by hand; each move prints the position from home (m, cm, mm) and the step on stderr and waits for Enter (`qmrdk sar scan --manual`). |
+| `qmrdk/sled.py` | `HardwareSled`: the `Sled` protocol over the sled controller's serial line protocol ([sled.md](sled.md)). |
 | `qmrdk/sim/scpi.py` | `SimBoard`, `SimResource`, `SimManager`: the firmware's SCPI state machine behind the PyVISA resource and resource-manager interfaces, so the layers above run unchanged against it. |
 
 Errors derive from `DeviceError`: `ScpiError` (board error queue),
@@ -90,6 +91,7 @@ restores memory location 0 without rebooting, `SYST:STAT?` reads
 | `qmrdk rf on\|off` | start (locked) or stop the sweep | as requested |
 | `qmrdk scpi CMD [--force]` | guarded raw command or query | off |
 | `qmrdk capture --frames K --n N --out rec.npz [--interval S] [--temperature]` | configure (sweep options as `set`) and record | off |
+| `qmrdk sar scan --out scan.npz [--sled URL] [--origin M] [--settle S] [--manual]` | step the sled across the aperture, one capture per position | off |
 | `qmrdk drift rec.npz --cal cal.json [--lines 3] [--out drift.png] [--report drift.json]` | phase drift of a static capture (signal-processing §9.1) | n/a |
 
 Every command takes `--sim` (process-wide simulated board),

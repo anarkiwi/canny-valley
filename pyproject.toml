@@ -10,7 +10,7 @@ license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
   "numpy", "scipy", "numba", "finufft", "matplotlib", "pillow", "tqdm",
-  "pyvisa", "pyvisa-py", "pyusb",
+  "pyvisa", "pyvisa-py", "pyusb", "pyserial",
 ]
 
 [project.optional-dependencies]

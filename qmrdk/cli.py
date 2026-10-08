@@ -66,8 +66,12 @@ def _scan(args):
     if args.sim:
         _, rec = _sim_scan(_scene(args.scene), sweep, geometry, args, _board(args))
     else:
-        sled = ManualSled() if args.manual else HardwareSled()
         positions = scan_positions(sweep, args.length, args.dx)
+        sled = (
+            ManualSled()
+            if args.manual
+            else HardwareSled(args.sled, args.origin, args.settle)
+        )
         with UsbRadar(sweep=sweep) as radar:
             rec = run_scan(radar, sled, positions, args.n, geometry)
     _clipping(rec.codes, args.out)
@@ -399,6 +403,9 @@ def parser():
     )
     p.add_argument("--scene", default="yard", help="built-in scene name or JSON")
     p.add_argument("--out", required=True, help="recording .npz")
+    p.add_argument("--sled", help="sled serial URL (default $QMRDK_SLED or USB id)")
+    p.add_argument("--origin", type=float, default=0.05, help="rail 0 from home, m")
+    p.add_argument("--settle", type=float, default=0.3, help="settle after move, s")
     _sim_options(p, seed=None)
     p.set_defaults(func=_scan)
     p = sar.add_parser("image", help="form an image from a scan recording")

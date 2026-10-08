@@ -8,6 +8,7 @@ import numpy as np
 
 from qmrdk.config import Sweep
 from qmrdk.device import Device, DeviceError, Idn, decode_chunk, ref_divider
+from qmrdk.sled import HardwareSled
 
 __all__ = [
     "DeviceError",
@@ -77,15 +78,6 @@ class UsbRadar:
 
     def close(self) -> None:
         self.device.close()
-
-
-class HardwareSled:
-    """Driver for the kit's sled controller, pending docs/sled.md."""
-
-    def __init__(self, port: str | None = None):
-        raise NotImplementedError(
-            f"sled controller interface not documented (port {port!r}); use --sim"
-        )
 
 
 class ManualSled:
