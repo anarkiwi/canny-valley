@@ -41,6 +41,8 @@ HP_ORDER = 4
 P_FALSE = 1e-3
 TARGET_RANGE = 8.0
 TARGET_ANGLE = 25.0
+OFFSET_SIGMA = 0.05
+PRIOR_PASSES = 3
 TIMING_PAIR = (90.0, 180.0, 0.25)
 FIRST_UP_PAIR = (20.0, 150.0, 1.0 / 12.0)
 
@@ -408,11 +410,15 @@ def estimate_guard(frames, sweep, cal, window="hann", zpad=4, taps=EQ_TAPS):
 
 
 class _ReflectorModel:
-    """Whitened profiles near the reflector and their model: direct and three
+    """Whitened profiles near the reflector (the bin whose history less its
+    mean, focused on the surveyed position, is strongest beyond the zero-range
+    main lobe) and their model: direct and three
     ground-image paths (z = 0), each bounced leg scaled by `rho0 + rho1 (sin
     e - mean)` (e: bounce-ray elevation); amplitudes and background projected out."""
 
-    def __init__(self, scan, sweep, cal, geometry, target, baseline, first_up, window):
+    def __init__(
+        self, scan, sweep, cal, geometry, target, baseline, first_up, window, kp=None
+    ):
         codes, x_pos = scan
         self.x = np.asarray(x_pos, dtype=np.float64)
         self.sweep, self.geometry = sweep, geometry
@@ -429,12 +435,14 @@ class _ReflectorModel:
         self.f_m = ph.f_m
         self.cell = C / (2.0 * sweep.slope * nu / cal.fs)
         win = get_window(window, nu, fftbins=False)
-        r_pred = 0.5 * self.lengths(mid)[0][:, 0].mean() + cal.r_cal
-        mag = np.abs(ph.profiles).mean(axis=0)
-        peaks = find_peaks(mag)[0]
-        kp = int(peaks[np.argmin(np.abs(ph.r_axis[peaks] - r_pred))])
-        self.r_peak = float(ph.r_axis[kp])
         h = int(np.ceil(window_lobes(window, nu)[0]))
+        steer = np.exp(-2j * np.pi * ph.f_m * self.lengths(mid)[0][:, 0] / C)
+        dyn = ph.profiles[:, h:] - ph.profiles[:, h:].mean(axis=0)
+        focus = np.abs(steer @ dyn)
+        self.kp = h + int(np.argmax(focus)) if kp is None else int(kp)
+        self.focus = float(focus[self.kp - h])
+        kp = self.kp
+        self.r_peak = float(ph.r_axis[kp])
         self.bins = np.arange(max(kp - h, 1), kp + h + 1)
         m = np.arange(nu) - 0.5 * (nu - 1)
         nfft = next_fast_len(nu, real=True)
@@ -563,9 +571,10 @@ class _ReflectorModel:
         )
         return cost, np.array([r_init, mid[0], mid[1], phi, rho.real, rho.imag, 0, 0])
 
-    def fit(self, mid, theta0):
+    def fit(self, mid, theta0, prior=None):
         """Nonlinear least squares from `theta0`, solved in `r_cal + grad R .
-        offset` (what the envelope measures) to decorrelate the parameters."""
+        offset` (what the envelope measures) to decorrelate the parameters.
+        `prior = (sigma, scale)`: Gaussian prior of the offset about `mid`."""
         h = 1e-4
         grad = [
             np.mean(
@@ -580,8 +589,16 @@ class _ReflectorModel:
         mix[0, 1:3] = -np.asarray(grad)
         shift = np.zeros(theta0.size)
         shift[0] = np.dot(grad, mid[:2])
+
+        def residual(p):
+            theta = mix @ p + shift
+            if prior is None:
+                return self.residual(theta)
+            pull = prior[1] * (theta[1:3] - mid[:2]) / prior[0]
+            return np.concatenate([self.residual(theta), pull])
+
         sol = least_squares(
-            lambda p: self.residual(mix @ p + shift),
+            residual,
             np.linalg.solve(mix, theta0 - shift),
             x_scale="jac",
             method="lm",
@@ -643,7 +660,8 @@ def focus_check(
     codes, x_pos, sweep, cal, geometry, target, window="hann", reflector=None
 ):
     """Image peak error and −3 dB widths along and across the line of sight,
-    with the predicted widths (signal-processing §11.4, projected aperture).
+    with the predicted widths (signal-processing §11.4, projected aperture);
+    returns constant along the rail (leakage, internal lines) removed.
     With a fitted `(model, theta, amp)` the error is taken against the image
     of the model scan (ground images included) instead of the target."""
     target = np.asarray(target, dtype=np.float64)
@@ -652,7 +670,7 @@ def focus_check(
     centre = np.array([x_pos.mean(), 0.0, geometry.height])
     u = (target[:2] - centre[:2]) / np.linalg.norm(target[:2] - centre[:2])
     v = np.array([-u[1], u[0]])
-    ph = phase_history(codes, sweep, cal, cal.first_up, None, window)
+    ph = phase_history(codes, sweep, cal, cal.first_up, "mean", window)
     aperture = np.ptp(x_pos) * x_pos.size / (x_pos.size - 1) * abs(u[1])
     rng = float(np.linalg.norm(target - centre))
     pred = np.array(
@@ -715,26 +733,36 @@ def estimate_reflector(
     window="hann",
     noise_var=None,
     check=True,
+    offset_sigma=OFFSET_SIGMA,
 ):
     """`first_up`, `r_cal` and antenna offsets from a reflector scan
-    (`Recording` or `(codes, x_pos)`). `cal` gives `fs`, `n0`, `ng` and the
-    nominal midpoint (its `z` is held); `noise_var` (step 1) gives `chi2`."""
+    (`Recording` or `(codes, x_pos)`), both ramp directions fitted on the bins
+    of the stronger focus. `cal` gives `fs`, `n0`, `ng` and the nominal
+    midpoint (`z` held, `x`, `y` with prior `offset_sigma`, None for none);
+    `noise_var` (step 1) gives `chi2`."""
     scan = _scan_arrays(scan)
     mid = np.mean([cal.tx_offset, cal.rx_offset], axis=0)
+    args = (scan, sweep, cal, geometry, target, baseline)
+    models = [_ReflectorModel(*args, up, window) for up in (True, False)]
+    kp = max(models, key=lambda m: m.focus).kp
     starts = []
-    for up in (True, False):
-        model = _ReflectorModel(
-            scan, sweep, cal, geometry, target, baseline, up, window
-        )
+    for model in models:
+        if model.kp != kp:
+            model = _ReflectorModel(*args, model.first_up, window, kp)
         starts.append(model.start(mid) + (model,))
     (cost, theta0, model), (other, _, _) = sorted(starts, key=lambda f: f[0])
-    sol = model.fit(mid, theta0)
-    s2 = 2.0 * sol.cost / (sol.fun.size - sol.x.size - sum(model.y.shape))
+    dof = model.y.size - theta0.size - sum(model.y.shape)
+    s2 = cost / dof
+    for _ in range(1 if offset_sigma is None else PRIOR_PASSES):
+        prior = None if offset_sigma is None else (offset_sigma, np.sqrt(s2))
+        sol = model.fit(mid, theta0, prior)
+        fun, jac = sol.fun[: model.y.size], sol.jac[: model.y.size]
+        s2 = float(fun @ fun) / dof
     bread = np.linalg.pinv(sol.jac.T @ sol.jac)
     score = np.einsum(
         "nkp,nk->np",
-        sol.jac.reshape(model.y.shape + (-1,)),
-        sol.fun.reshape(model.y.shape),
+        jac.reshape(model.y.shape + (-1,)),
+        fun.reshape(model.y.shape),
     )
     npos = model.y.shape[0]
     cov = bread @ (score.T @ score) @ bread * npos / (npos - sol.x.size)
@@ -1051,7 +1079,7 @@ def run_step(args):
                         args.sled_sigma,
                     )
                     cal = cal if path and path.is_file() else nominal(hw)
-                elif step in _STATIC and _recorded(args):
+                elif step in (*_STATIC, "reflector") and _recorded(args):
                     radar, sled = None, None
                 else:
                     sled = None if step in _STATIC else HardwareSled()
@@ -1116,6 +1144,18 @@ def _static(args, radar, sled, geometry, target, cal, check=TIMING_PAIR):
     return codes, sweep
 
 
+def _reflector_scan(args, radar, sled, geometry, target):
+    """Reflector scan and its sweep: from `--frames-file` if it exists, else
+    scanned and saved there."""
+    if _recorded(args):
+        rec = Recording.load(args.frames_file)
+        return (rec.codes, rec.x_pos), rec.sweep
+    rec = run_reflector(radar, sled, geometry, target, args.length, args.n)
+    if args.frames_file:
+        rec.save(args.frames_file)
+    return rec, radar.sweep
+
+
 def _baseline(args, cal):
     return args.baseline or float(abs(cal.rx_offset[0] - cal.tx_offset[0]))
 
@@ -1131,7 +1171,12 @@ _STEPS = {
         *_static(a, r, s, g, t, c, FIRST_UP_PAIR), c, not a.away
     ),
     "reflector": lambda a, r, s, g, t, c: estimate_reflector(
-        run_reflector(r, s, g, t, a.length, a.n), r.sweep, c, g, t, _baseline(a, c)
+        *_reflector_scan(a, r, s, g, t),
+        c,
+        g,
+        t,
+        _baseline(a, c),
+        offset_sigma=a.offset_sigma,
     ),
     "repeat": lambda a, r, s, g, t, c: estimate_repeatability(
         run_repeat(r, s, g, t, a.length, a.n, a.scans),
@@ -1173,7 +1218,9 @@ _ARGS = (
     ),
     (
         "--frames-file",
-        {"help": "static frames .npz: read if present, else captured and saved"},
+        {
+            "help": "static frames or reflector scan .npz: read if present, else captured and saved"
+        },
     ),
     (
         "--pair",
@@ -1189,6 +1236,10 @@ _ARGS = (
     ("--baseline", {"type": float, "help": "tx-rx aperture separation, m"}),
     ("--length", {"type": float, "default": 1.5, "help": "scan length, m"}),
     ("--ramp-time", {"type": float, "default": 8.0, "help": "ramp time, ms"}),
+    (
+        "--offset-sigma",
+        {"type": float, "default": OFFSET_SIGMA, "help": "antenna offset prior, m"},
+    ),
     ("--height", {"type": float, "default": 1.0, "help": "rail height, m"}),
     ("--seed", {"type": int, "default": 0, "help": "simulation seed"}),
     (
