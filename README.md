@@ -34,8 +34,11 @@ qmrdk set --f0 2.4 --f1 2.5 --ramp-time 16 --type triangle    # configure; leave
 qmrdk rf off                                                  # stop the sweep (RF off)
 qmrdk scpi 'SYST:TEMP?'                                       # guarded raw command
 qmrdk capture --frames 10 --n 4096 --out artifacts/rec.npz    # frames into a recording
+qmrdk capture --frames 1200 --interval 1 --temperature --out artifacts/static.npz
+qmrdk drift artifacts/static.npz --cal cal.json --out artifacts/drift.png   # phase drift vs time and temperature
 qmrdk sar demo --scene yard --out artifacts/yard.png          # simulated scan, calibration, animated truth vs SAR
 qmrdk sar scan --sim --scene yard --out artifacts/scan.npz    # simulated scan recording
+qmrdk sar scan --manual --length 1.5 --out artifacts/scan.npz # board on USB, radar moved by hand when prompted
 qmrdk sar image artifacts/scan.npz --cal cal.json --scene yard --out artifacts/scan.png
 qmrdk calib sim --cal cal.json                                # full calibration procedure on the simulated board
 qmrdk calib {timing,guard,reflector,repeat} --sim --cal cal.json

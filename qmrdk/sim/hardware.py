@@ -12,6 +12,7 @@ from qmrdk.constants import A_FS, ADC_MAX, C
 from qmrdk.sim.propagation import Antenna, Paths
 
 PREROLL = 4e-3
+T_REF = 25.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -34,6 +35,8 @@ class Hardware:
     lp_fc: float = 9e3
     lp_order: int = 4
     r_cal: float = 0.35
+    delay_tc: float = 0.0
+    temperature: float = T_REF
     tx_offset: tuple[float, float, float] = (-0.06, 0.02, 0.0)
     rx_offset: tuple[float, float, float] = (0.06, 0.02, 0.0)
     antenna: Antenna = Antenna(g0=10.0, beamwidth=60.0)
@@ -50,6 +53,12 @@ class Hardware:
             raise ValueError("need 0 <= t_reset <= t_start")
         if self.pll_fn <= 0 or self.pll_zeta <= 0:
             raise ValueError("pll_fn and pll_zeta must be positive")
+
+    @property
+    def r_extra(self):
+        """Extra delay as range at `temperature`: `r_cal` at `T_REF` plus
+        `delay_tc` (m/degC) per degree above it."""
+        return self.r_cal + self.delay_tc * (self.temperature - T_REF)
 
     @property
     def fsim(self):
@@ -102,7 +111,7 @@ class Hardware:
             fs=self.fs,
             n0=float(self.fs * (self.t_start + self.if_group_delay(f_ref))),
             first_up=None if sweep.kind == "cw" else self.first_up,
-            r_cal=self.r_cal,
+            r_cal=self.r_extra,
             tx_offset=tuple(self.tx_offset),
             rx_offset=tuple(self.rx_offset),
         )
@@ -173,7 +182,7 @@ def _moving_sum(f, t, delay, rate, amp):  # pragma: no cover
 
 def _if_sum(paths: Paths, hw: Hardware, f, t) -> np.ndarray:
     """Unfiltered IF for 1 W and unit gain at times `t`, synthesiser frequencies `f`."""
-    extra = 2.0 * hw.r_cal / C
+    extra = 2.0 * hw.r_extra / C
     static = paths.speed == 0
     delay = np.concatenate([[2.0 * hw.leak_range / C], paths.delay[static]]) + extra
     amp = np.concatenate([[complex(hw.leak_amp)], paths.amp[static]]).astype(

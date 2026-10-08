@@ -12,7 +12,8 @@ from qmrdk.config import ScanGeometry, Sweep
 @dataclasses.dataclass
 class Recording:
     """A sequence of captures with their sweep, timestamps and, for SAR scans,
-    sled positions. `extra` holds free-form metadata (e.g. surveyed target)."""
+    sled positions. `extra` holds free-form metadata (e.g. surveyed target);
+    `temperature` the board temperature (degC) of each capture, if read."""
 
     codes: np.ndarray
     sweep: Sweep
@@ -20,6 +21,7 @@ class Recording:
     x_pos: np.ndarray | None = None
     geometry: ScanGeometry | None = None
     extra: dict = dataclasses.field(default_factory=dict)
+    temperature: np.ndarray | None = None
 
     def save(self, path) -> None:
         meta = {
@@ -32,8 +34,9 @@ class Recording:
         }
         arrays = {"codes": np.asarray(self.codes, dtype=np.uint16)}
         arrays["t_host"] = np.asarray(self.t_host, dtype=np.float64)
-        if self.x_pos is not None:
-            arrays["x_pos"] = np.asarray(self.x_pos, dtype=np.float64)
+        for name in ("x_pos", "temperature"):
+            if getattr(self, name) is not None:
+                arrays[name] = np.asarray(getattr(self, name), dtype=np.float64)
         np.savez_compressed(path, meta=np.array(json.dumps(meta)), **arrays)
 
     @classmethod
@@ -48,4 +51,5 @@ class Recording:
                 x_pos=f["x_pos"] if "x_pos" in f else None,
                 geometry=None if geometry is None else ScanGeometry(**geometry),
                 extra=meta.get("extra", {}),
+                temperature=f["temperature"] if "temperature" in f else None,
             )

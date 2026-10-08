@@ -236,7 +236,8 @@ procedure measures, plus the analogue chain:
 | `pll_fn`, `pll_zeta` | closed-loop natural frequency and damping of the synthesiser (type 2) | 4 kHz, 0.7 |
 | `hp_fc`, `hp_order` | IF high-pass corner and order (Butterworth; order 0 removes it) | 40 Hz, 1 |
 | `lp_fc`, `lp_order` | IF low-pass corner and order (Butterworth; order 0 removes it) | 9 kHz, 4 |
-| `r_cal` | fixed extra delay as range (`delay = 2 r_cal / c` added to every path) | 0.35 m |
+| `r_cal` | fixed extra delay as range at 25 °C (`delay = 2 r_cal / c` added to every path) | 0.35 m |
+| `delay_tc`, `temperature` | extra delay drift as range per °C above 25 °C, and board temperature (`r_extra = r_cal + delay_tc (temperature − 25)`) | 0 m/°C, 25 °C |
 | `tx_offset`, `rx_offset` | true antenna phase centres from the sled reference | (−0.06, 0.02, 0), (0.06, 0.02, 0) |
 | `antenna` | antenna model (§3) | `g0` 10 (10 dBi), beamwidth 60° |
 | `leak_amp`, `leak_range` | direct tx→rx coupling: field amplitude and equivalent range | 1e-3 √W, 0.1 m |

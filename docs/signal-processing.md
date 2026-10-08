@@ -295,6 +295,33 @@ not a uniform grid.
 Display scaling: levels relative to the recording maximum with a selectable
 dynamic range, colour map linear in dB.
 
+### 9.1 Drift of a static capture
+
+`qmrdk drift` (`qmrdk/drift.py`) measures whether a rail scan stays
+coherent and whether one background reference covers it, from a long
+static capture (`qmrdk capture --interval --temperature`):
+
+1. Per frame, ramps of each direction (§4.3, calibration `fs`, `n0`, `ng`)
+   are averaged and transformed (§5).
+2. The line bins are the `--lines` strongest peaks (default 3) beyond the
+   zero-range main lobe of the mean frame, reported as `target`, `line2`,
+   ...; the leakage bin is the strongest inside it (DC excluded). Lines that
+   do not move with the radar (internal reflections) are tracked alongside
+   the scene.
+3. Phase per direction is unwrapped over frames, referenced to the first
+   frame and averaged over the two directions; the equivalent range drift is
+   `c phi / (4 pi f_m)`. Its sign holds only with a calibrated `first_up`.
+   The leakage line overlaps its own image, so its range scale is nominal.
+4. Reported per line: frame-to-frame noise (rms second difference / √6),
+   span, amplitude std (dB), residual `|z − z̄|² / |z̄|²` (dB) against the
+   mean as a background reference, least-squares rate (mm/min) and
+   temperature coefficients (deg/°C, mm/°C) with standard errors, and the
+   overlapping Allan deviation of the range drift at octave `tau`.
+
+The phase of a windowed bin also carries the line's image and the
+neighbouring lines' sidelobes, which bias the coefficients by a fraction
+of the order of their relative level at the bin.
+
 ## 10. Detection
 
 Optional peak extraction on a range profile or Doppler spectrum in the

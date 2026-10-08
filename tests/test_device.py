@@ -252,9 +252,16 @@ def test_leave_rf_on(board):
 
 
 def test_capture_many(running, board):
-    codes, t_host = running.capture_many(40, 3)
+    codes, t_host, temp = running.capture_many(40, 3)
     np.testing.assert_array_equal(codes, np.stack(board.source.served))
-    assert codes.shape == (3, 40) and np.all(np.diff(t_host) >= 0)
+    assert codes.shape == (3, 40) and np.all(np.diff(t_host) >= 0) and temp is None
+
+
+def test_capture_many_temperature_interval(running, board):
+    board.temperature = lambda k: 30.0 + 0.5 * k
+    _, t_host, temp = running.capture_many(40, 3, interval=0.05, temperature=True)
+    np.testing.assert_allclose(temp, [30.0, 30.5, 31.0])
+    assert np.all(np.diff(t_host) >= 0.05)
 
 
 def test_reset(board):

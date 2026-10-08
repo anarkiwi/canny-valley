@@ -60,14 +60,14 @@ def test_identify_and_read_back(dev):
 @pytest.mark.parametrize("n", [1, 31, 32, 4096])
 def test_frame_lengths(dev, n):
     dev.configure(Sweep())
-    codes, t_host = dev.capture_many(n, 2)
+    codes, t_host, _ = dev.capture_many(n, 2)
     assert codes.shape == (2, n) and t_host[1] > t_host[0]
     assert not dev.errors()
 
 
 def test_frames_synchronised(dev):
     dev.configure(Sweep())
-    codes, _ = dev.capture_many(4096, 2)
+    codes, _, _ = dev.capture_many(4096, 2)
     rho = np.corrcoef(codes_to_volts(codes))[0, 1]
     record(dev, "synchronised", {"correlation": float(rho)})
     assert rho > 0.99

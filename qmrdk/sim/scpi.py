@@ -60,10 +60,13 @@ def _timeout():
     return errors.VisaIOError(StatusCode.error_timeout)
 
 
-def scene_source(scene: str = "single", hardware: Hardware | None = None, seed=0):
+def scene_source(
+    scene: str = "single", hardware: Hardware | None = None, seed=0, temperature=None
+):
     """Frame source `(n, sweep) -> codes` synthesising a built-in scene with
-    the board model. Types 0 and 1 run one ramp or triangle at the start of
-    the frame and hold the frequency after it (protocol §3.1)."""
+    the board model, at the board temperature `temperature()` if given. Types
+    0 and 1 run one ramp or triangle at the start of the frame and hold the
+    frequency after it (protocol §3.1)."""
     hw = Hardware() if hardware is None else hardware
     rng = np.random.default_rng(seed)
     radars = {}
@@ -75,6 +78,8 @@ def scene_source(scene: str = "single", hardware: Hardware | None = None, seed=0
         if auto not in radars:
             geom = compile_scene(builtin_scene(scene), auto.lam)
             radars[auto] = SimRadar(geom, hw, auto, SimSled(), ScanGeometry(), rng)
+        if temperature is not None:
+            radars[auto].hardware = dataclasses.replace(hw, temperature=temperature())
         codes = radars[auto].capture(n)
         if sweep.kind in ("ramp", "tri"):
             ramps = 1 if sweep.kind == "ramp" else 2
@@ -90,7 +95,9 @@ class SimBoard:
     """One simulated board. `source(n, sweep)` supplies the codes of each
     `CAPT:FRAM n`; `faults` (from FAULTS) apply to successive captures;
     `stuck_unlocked` keeps `FREQ:LOCK?` at 0; `*RST` and a `disconnect` fault
-    re-enumerate after `reboot_s`; `log` holds every message received."""
+    re-enumerate after `reboot_s`; `log` holds every message received.
+    `temperature` (degC) is a constant or a function of the number of frames
+    captured so far; the default source synthesises `hardware` at it."""
 
     def __init__(
         self,
@@ -98,11 +105,17 @@ class SimBoard:
         firmware: str = "V1.1.0",
         source=None,
         reboot_s: float = 0.0,
-        temperature: float = 31.25,
+        temperature=31.25,
         fs: float = Hardware.fs,
+        hardware: Hardware | None = None,
     ):
         self.serial, self.firmware = serial, firmware
-        self.source = scene_source() if source is None else source
+        self.captures = 0
+        self.source = (
+            scene_source(hardware=hardware, temperature=self.read_temperature)
+            if source is None
+            else source
+        )
         self.reboot_s, self.temperature, self.fs = reboot_s, temperature, fs
         self.memory = {0: dict(DEFAULTS)}
         self.faults = collections.deque()
@@ -117,6 +130,11 @@ class SimBoard:
         self.errs = [(-500, MESSAGES[-500])]
         self.esr, self.ese, self.sre = 128, 0, 0
         self.frame, self.cursor, self.fault, self.wait_s = "", 0, None, None
+
+    def read_temperature(self) -> float:
+        """Board temperature, degC."""
+        t = self.temperature
+        return float(t(self.captures) if callable(t) else t)
 
     @property
     def online(self) -> bool:
@@ -227,7 +245,7 @@ class SimBoard:
             "SYST:MODNUM?": lambda t: MODEL,
             "SYST:FIRM?": lambda t: self.firmware,
             "SYST:VERS?": lambda t: "1999.0",
-            "SYST:TEMP?": lambda t: f"{self.temperature:.2f}",
+            "SYST:TEMP?": lambda t: f"{self.read_temperature():.2f}",
             "SYST:STAT?": lambda t: '0,"Operational"',
             "SYST:ERR?": self._pop_error,
             "*ESR?": self._read_esr,
@@ -330,6 +348,7 @@ class SimBoard:
         sweep = self.sweep
         live = self.rf and self.sweeping and (sweep.kind == "cw" or sweep.ramp_time)
         codes = self.source(n, sweep) if live else np.full(n, MID_SCALE)
+        self.captures += 1
         self.frame = np.asarray(codes, ">u2").tobytes().hex().upper()
         self.cursor, self.wait_s = 0, ARM_DELAY + n / self.fs
 

@@ -1,11 +1,13 @@
-"""UsbRadar: the Radar protocol over the device layer."""
+"""UsbRadar: the Radar protocol over the device layer; the manual sled."""
+
+import io
 
 import numpy as np
 import pytest
 
 from qmrdk import device, radar, transport
 from qmrdk.config import Sweep
-from qmrdk.radar import DeviceError, UsbRadar
+from qmrdk.radar import DeviceError, ManualSled, UsbRadar
 from qmrdk.sim.scpi import SimBoard
 
 
@@ -46,3 +48,17 @@ def test_open_errors(attach):
     with pytest.raises(DeviceError, match="not locked"):
         UsbRadar()
     assert not board.rf
+
+
+def test_manual_sled():
+    asked, out = [], io.StringIO()
+    sled = ManualSled(prompt=lambda text: asked.append(out.getvalue()), out=out)
+    assert sled.position() == 0.0
+    sled.home()
+    sled.move_to(0.0)
+    sled.move_to(0.0305)
+    assert sled.position() == 0.0305 and len(asked) == 2
+    lines = out.getvalue().splitlines()
+    assert "0.0000 m = 0.00 cm = 0.0 mm from home;" in lines[0]
+    assert "0.0305 m = 3.05 cm = 30.5 mm from home, +30.5 mm from here" in lines[1]
+    assert asked[1].endswith("Enter when placed\n")

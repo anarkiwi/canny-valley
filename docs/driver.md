@@ -9,7 +9,7 @@ Host driver for the QM-RDK board over USB, implementing
 |--------|------|
 | `qmrdk/transport.py` | The only module that opens USB resources. Discovery (vendor ID `0x2012`, any product ID, `*IDN?` of the form `Quonset Microwave,QM4004,<serial>,<firmware>`, optional serial number), `write` / `query` with LF termination and per-call timeout, the §3.7 error policy (`SYST:ERR?` drained after every setter, non-zero raises `ScpiError` with code and text, `-500 Power on` consumed), frame flush (`CAPT:FRAM?` until `Not Ready`, in place of device clear), reopen by serial number after re-enumeration. Refuses every command outside the documented set (protocol §3.8), including `CAPT:STRE`. |
 | `qmrdk/device.py` | `Device`: typed commands over a `Transport`. `identify`, `settings` (read-back `Sweep`, reference divider, RF, lock), `configure` with host-side validation, `start` / `stop` / `rf`, `temperature`, `status`, `errors`, `reset`, `save` / `recall` / `restore_factory`, `capture` / `capture_many`, guarded `scpi` passthrough. |
-| `qmrdk/radar.py` | `UsbRadar`: the `Radar` protocol (`sweep`, `capture(n)`) over a `Device`, used by scans and calibration. |
+| `qmrdk/radar.py` | `UsbRadar`: the `Radar` protocol (`sweep`, `capture(n)`) over a `Device`, used by scans and calibration. `ManualSled`: the `Sled` protocol by hand; each move prints the position from home (m, cm, mm) and the step on stderr and waits for Enter (`qmrdk sar scan --manual`). |
 | `qmrdk/sim/scpi.py` | `SimBoard`, `SimResource`, `SimManager`: the firmware's SCPI state machine behind the PyVISA resource and resource-manager interfaces, so the layers above run unchanged against it. |
 
 Errors derive from `DeviceError`: `ScpiError` (board error queue),
@@ -35,7 +35,8 @@ A failed frame is flushed, the error queue drained and the frame retried. A
 lost session is reopened and the sweep re-applied, since the board may have
 rebooted. Capture is refused unless the sweep was started and locked in this
 session. `capture_many(n, count)` returns the frames and the host time of
-each `CAPT:FRAM`, with a progress bar.
+each `CAPT:FRAM`, with a progress bar; optionally frame starts at least
+`interval` apart and the board temperature before each frame.
 
 ## Safety
 
@@ -71,7 +72,9 @@ scene; types 0 and 1 hold the frequency after one ramp or triangle.
 Faults: `board.inject(...)` applies one per subsequent `CAPT:FRAM`:
 `nonhex`, `truncate` (one sample short), `not_ready`, `stall` (first read
 times out), `disconnect` (reboot), `unplug` (never returns);
-`board.stuck_unlocked` holds `FREQ:LOCK?` at 0.
+`board.stuck_unlocked` holds `FREQ:LOCK?` at 0. `temperature` is a constant
+or a function of the number of frames captured; the default source
+synthesises its `hardware` (§4.1 of simulation.md) at that temperature.
 
 Where the protocol leaves behaviour open the simulator assumes: `SYST:PRES`
 restores memory location 0 without rebooting, `SYST:STAT?` reads
@@ -86,12 +89,15 @@ restores memory location 0 without rebooting, `SYST:STAT?` reads
 | `qmrdk set --f0 --f1 --ramp-time --type` | configure, start, print read-back | on, sweeping as set |
 | `qmrdk rf on\|off` | start (locked) or stop the sweep | as requested |
 | `qmrdk scpi CMD [--force]` | guarded raw command or query | off |
-| `qmrdk capture --frames K --n N --out rec.npz` | configure (sweep options as `set`) and record | off |
+| `qmrdk capture --frames K --n N --out rec.npz [--interval S] [--temperature]` | configure (sweep options as `set`) and record | off |
+| `qmrdk drift rec.npz --cal cal.json [--lines 3] [--out drift.png] [--report drift.json]` | phase drift of a static capture (signal-processing §9.1) | n/a |
 
 Every command takes `--sim` (process-wide simulated board),
 `--resource NAME` and `--serial N`. `capture` writes a native recording
 (§5) with `t_host` and, in `extra`, the `*IDN?` fields, resource, reference
-divider and sample rate.
+divider and sample rate. `--interval` sets the minimum time between frame
+starts; `--temperature` reads `SYST:TEMP?` before each frame into the
+recording's `temperature`.
 
 ## Tests
 

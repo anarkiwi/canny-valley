@@ -11,7 +11,7 @@ with `--cal`.
 | `fs` | ADC rate relative to the sweep clock (`Nr = T * fs`) | 1 |
 | `n0` | apparent position of the first turnaround in a frame | 1 |
 | `ng` | turnaround guard | 2 |
-| `first_up` | direction of the ramp starting at `n0` | 3 |
+| `first_up` | direction of the ramp starting at `n0` | 3, 3a |
 | `r_cal` | fixed delay as range | 3 |
 | `tx_offset`, `rx_offset` | antenna phase centres from the sled reference | 3 |
 | `sled_sigma` | sled position repeatability | 4 |
@@ -248,6 +248,42 @@ Limits found in simulation:
 The fitted offsets are in the frame defined by the surveyed reflector
 position, so a survey error moves the image as a whole by the same amount.
 This is why the survey uses the same rail origin as imaging.
+
+## 3a. Static ramp direction (`first_up`)
+
+`first_up` without a scan: two static sets, the radar moved about 1 cm
+(`lam / 12`) straight towards the reflector between them, so the range
+changes by less than `lam / 4` and the sign of the line phase change is
+unambiguous.
+
+```
+qmrdk calib first-up --frames-file A.npz --cal cal.json                # first position
+# move the radar about 1 cm straight towards the reflector
+qmrdk calib first-up --frames-file B.npz --pair A.npz --cal cal.json
+```
+
+`--away` declares a move away from the reflector. With `--sim` the sled
+makes the move.
+
+Estimation (`qmrdk.calib.estimate_first_up`):
+
+1. Ramps as in step 1, at `cal`'s `fs` and `n0` (or the timing of the
+   first set if `cal` has none). The line is the strongest of the
+   difference of the two mean frames' spectra, so a return that does not
+   move with the radar (an internal reflection, leakage) is not chosen even
+   when it is the strongest line. Without a difference line above the
+   noise (Rayleigh, probability 1e-3) `φ` is 0. `φ` is the line's phase
+   change (`calib.pair_phase`), referenced to the first ramp used, which
+   starts at turnaround `j0` after `n0`.
+2. An up ramp's line has phase `+2π f τ`, a down ramp's `-2π f τ`. So
+   `φ > 0` on an up ramp when the range grows. The ramp at `j0` is up iff
+   `(φ > 0)` equals `--away`; `first_up` is that, inverted for odd `j0`.
+3. Reported range change: `|φ| lam / 720` (`φ` in degrees), negative
+   towards the reflector.
+
+Refused unless `20° ≤ |φ| ≤ 150°`: below, noise and drift can flip the
+sign; near 180° the direction is ambiguous. The `--pair` check applies the
+same window before capturing the second set.
 
 ## 4. Sled repeatability (`sled_sigma`)
 
