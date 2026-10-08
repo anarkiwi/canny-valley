@@ -16,7 +16,9 @@ The USB driver ([docs/driver.md](docs/driver.md)) configures, captures and
 keeps the RF off outside captures; every board command also runs against a
 simulated board with `--sim`. The sled driver ([docs/sled.md](docs/sled.md))
 steps the radar along the rail for scans and calibration steps 3 and 4, on
-hardware or against the simulated board and scene.
+hardware or against the simulated board and scene; `firmware/sled` is the
+sled controller's Arduino firmware, built, tested and flashed with
+`docker/firmware.Dockerfile`.
 
 ## Install
 

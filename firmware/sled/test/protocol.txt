@@ -1,0 +1,78 @@
+# Line protocol transcript shared by the core tests (test_core.cpp) and the
+# host driver's fake controller (tests/test_sled.py). "> " lines are sent;
+# the "< " lines that follow are every reply once motion has finished.
+# The controller starts unhomed at position 0 with the home switch released.
+> id?
+< id qmrdk-sled 1 777544 1
+> status?
+< status homed=0 moving=0 homing=0 pos=0 target=0 home=0 end=0 microstep=1 speed=500 accel=1000 max=1221
+> move 10
+< err not homed
+> stop
+< ok 0
+> bogus
+< err unknown
+> move
+< err unknown
+> move 1x
+< err unknown
+> move 1 2
+< err unknown
+> pos? 3
+< err unknown
+> move 99999999999
+< err unknown
+> speed 0
+< err range
+> speed 4001
+< err range
+> accel 100001
+< err range
+> microstep 3
+< err range
+> home
+< ok 0
+> pos?
+< pos 0
+> move 1222
+< err range
+> move -1
+< err range
+> move 600
+< ok 600
+> move 600
+< ok 600
+> microstep 4
+< microstep 4
+> status?
+< status homed=1 moving=0 homing=0 pos=2400 target=2400 home=0 end=0 microstep=4 speed=500 accel=1000 max=4884
+> speed 2000
+< speed 2000
+> accel +4000
+< accel 4000
+> move 4884
+< ok 4884
+> microstep 16
+< microstep 16
+> pos?
+< pos 19536
+> microstep 8
+< microstep 8
+> move 3
+< ok 3
+> microstep 1
+< microstep 1
+> pos?
+< pos 0
+> microstep 2
+< microstep 2
+> move 1
+< ok 1
+> microstep 1
+< microstep 1
+> pos?
+< pos 1
+> status?
+< status homed=1 moving=0 homing=0 pos=1 target=1 home=0 end=0 microstep=1 speed=2000 accel=4000 max=1221
+> home
+< ok 0

@@ -3,3 +3,4 @@
 artifacts
 untracked
 **/__pycache__
+firmware/build
