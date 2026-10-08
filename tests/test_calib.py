@@ -248,6 +248,23 @@ def test_reflector_recovers_truths(truths):
     json.dumps(res.summary())
 
 
+def test_reflector_ignores_radar_fixed_return_at_predicted_range():
+    """A strong return fixed to the radar (an internal reflection) at the
+    range predicted with the nominal r_cal: the bin is chosen by focusing on
+    the surveyed position, not by the nearest profile peak."""
+    truths = ALT | {"hp_order": 0, "r_cal": 4.0}
+    start = calib.nominal(Hardware(**truths))
+    mid = np.mean([start.tx_offset, start.rx_offset], axis=0)
+    r_pred = np.linalg.norm(np.asarray(TARGET) - [0.75 + mid[0], mid[1], GEOM.height])
+    truths |= {"leak_amp": 0.05, "leak_range": r_pred - truths["r_cal"]}
+    hw, cal, (rec,) = scan(truths, seed=4)
+    res = calib.estimate_reflector(
+        rec, SWEEP, cal, GEOM, TARGET, 0.12, noise_var=hw.noise**2
+    )
+    assert res.first_up == hw.first_up
+    assert mahalanobis(res, hw) < CHI2_3
+
+
 def test_reflector_tuple_input(alt_scan):
     hw, cal, (rec,) = alt_scan
     res = calib.estimate_reflector(
@@ -339,6 +356,19 @@ def test_cli_steps(tmp_path, capsys):
     assert result.first_up == hw.first_up
     assert result.sled_sigma > 0
     assert "repeat" in capsys.readouterr().out
+
+
+def test_cli_reflector_saved_and_refitted_offline(tmp_path):
+    scan_file, rep = str(tmp_path / "scan.npz"), tmp_path / "report.json"
+    common = ["--frames-file", scan_file, "--report", str(rep), "--ramp-time", "16"]
+    assert run_cli(["calib", "reflector", "--sim", *common]) == 0
+    first = json.loads(rep.read_text())["reflector"]
+    assert Recording.load(scan_file).x_pos.size > 1
+    cal = tmp_path / "cal.json"
+    calib.nominal(Hardware()).save(cal)
+    assert run_cli(["calib", "reflector", "--cal", str(cal), *common]) == 0
+    again = json.loads(rep.read_text())["reflector"]
+    assert again["r_cal"] == pytest.approx(first["r_cal"], abs=1e-9)
 
 
 def test_cli_sim(tmp_path):

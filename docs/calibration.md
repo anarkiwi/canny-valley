@@ -192,14 +192,21 @@ cell. The estimator therefore models the ground image paths.
 
 Acquisition: `qmrdk calib reflector --target X Y Z` runs a full SAR scan
 (`dx ≤ lam_min / 4`) across the aperture and stores it with the surveyed
-position.
+position; with `--frames-file` the scan is saved there, or read from there
+if the file exists, so the estimate can be repeated offline.
 
 Estimation (`qmrdk.calib.estimate_reflector`):
 
 1. Phase history (§11.2) without background subtraction, without zero
-   padding, for both ramp-direction hypotheses. Keep the bins within the
-   window main lobe of the profile peak nearest the predicted range. Whiten
-   them with the known covariance of windowed white noise between bins.
+   padding, for both ramp-direction hypotheses. The reflector's bin is the
+   one whose history, less its mean over positions and compensated by the
+   phase the surveyed geometry predicts, sums to the largest magnitude
+   beyond the zero-range main lobe, under the hypothesis focusing more
+   strongly. Returns fixed to the radar (leakage, internal reflections) are
+   constant over positions and cancel, so neither they nor an `r_cal` far
+   from nominal mislead the choice. Both hypotheses use the bins within the
+   window main lobe of that bin. Whiten them with the known covariance of
+   windowed white noise between bins.
 2. Model per position `n`: the four paths tx→P→rx with the transmit and/or
    receive leg mirrored in `z = 0`. Each path is a unit tone through the
    same window and ramp-mean removal as the data (closed form: shifted
@@ -221,15 +228,21 @@ Estimation (`qmrdk.calib.estimate_reflector`):
    `(ox, oy)`, the phase and `ρ0`, `ρ1`. It is solved in
    `r_cal + ∇R · o`, the combination the envelope measures. `oz` is held at
    its mechanical value. `tx_offset` and `rx_offset` are the midpoint ∓
-   half the measured baseline along `x`.
+   half the measured baseline along `x`. `(ox, oy)` carry a Gaussian prior
+   about the mechanical midpoint (`--offset-sigma`, default 5 cm), weighted
+   against the residual variance of the converged fit and refitted until
+   that weight settles. Over a short aperture the offset along the line of
+   sight and `r_cal` differ only through the range curvature, and without
+   the prior model error moves the fit metres along that direction; with a
+   clean fit the residual is small and the prior has no effect.
 5. Covariance of `(r_cal, ox, oy)`: cluster-robust (sandwich) estimate with
    positions as clusters. Sled position errors and any per-position model
    error are correlated across a position's bins. The report also gives the
    phase-residual RMS as range, `σ_R = c σ_φ / (4π f_m)`, and `chi2`, the
    residual variance over the noise variance expected from step 1 (1 for an
    adequate model).
-6. Check: image the scan with the new calibration and image the fitted
-   model scan the same way. The data image peak must lie within half a
+6. Check: image the scan with the new calibration, with returns constant
+   along the rail removed, and image the fitted model scan the same way. The data image peak must lie within half a
    resolution cell of the model image peak; the ground images displace both
    peaks equally from the surveyed position (`model_offset`). The −3 dB
    widths are compared with signal-processing §11.4, using the aperture
