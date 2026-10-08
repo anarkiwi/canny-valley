@@ -373,6 +373,12 @@ ignored unless configured.
    filter in slow time: it also removes the aperture-mean part of a target's
    phase history, which noticeably distorts the cross-range response of a
    target whose phase varies little along the rail (broadside, long range).
+   A change image instead subtracts, in volts and before segmentation, the
+   frames of a reference scan taken at the same positions with the same
+   sweep and frame length: everything common to both scans (static scene,
+   leakage, rail and mount) cancels coherently and only what changed
+   remains, without the slow-time high-pass of the mean. No further
+   background subtraction is applied by default.
 4. Window, zero-pad, FFT, keep the positive-frequency half, and multiply
    bin `k` by `exp(j * 2*pi * k * (Nu - 1) / (2 * Nfft))` so that phase is
    referenced to the centre of the ramp: complex range profile `p_n[k]` for
@@ -404,8 +410,17 @@ I(x, y)   = sum_n  p_n( R_n ) * exp( -j * 4 * pi * f_m * R_n / c )
 `tx_n`, `rx_n` are the transmit and receive antenna phase centres at
 position `n` (the two cantennas are side by side; their offsets from the
 sled reference are configuration). `p_n(R_n)` is linearly interpolated from
-the zero-padded profile. An optional aperture window weights the sum over
-`n`.
+the zero-padded profile. An aperture window weights the sum over `n`;
+Hann by default. The cross-range response of an untapered aperture has
+-13 dB sidelobes, so on a short rail a strong scatterer spreads across the
+image at levels above most of the scene; Hann lowers them to -31 dB at the
+cost of a 1.6× wider main lobe.
+
+The image extent starts at a minimum ground range (default 3 m). Returns
+closer than that are dominated by the rail, the mount and antenna leakage;
+left in the image they set its maximum and push the scene below the
+displayed dynamic range. The range axis includes the internal delay
+unless `R_cal` is calibrated.
 
 Backprojection is chosen over the range-migration algorithm of the MIT
 reference script because it is exact in the near field, accepts unequal
@@ -457,6 +472,8 @@ device used by the protocol tests.
 | Vendor-equivalent spectrum | matches a direct evaluation of the vendor formula on the same input |
 | SAR point response | synthetic scatterer at `(x, y)` scanned over `L` → image peak within half a resolution cell; -3 dB widths equal `c / (2B)` and `lam * R / (2L)` times the broadening factor of the windows used |
 | SAR ramp direction | sharpness test selects the generated direction for every sweep phase offset |
+| SAR aperture taper | cross-range peak sidelobe level of a point target equals that of the aperture window (-13.3 dB rectangular, -31.5 dB Hann) |
+| SAR change image | scan with an added point target minus the scan without it → peak within half a resolution cell of the added target; unchanged scatterers suppressed by more than 20 dB |
 | SAR sampling | grating lobes absent at `dx = lam_min / 4`, present at the predicted angle for `dx = lam` |
 
 Recordings from the real board (gitignored `artifacts/`) are used for the

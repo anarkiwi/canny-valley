@@ -19,7 +19,7 @@ from scipy.signal import butter, find_peaks, get_window, sosfiltfilt
 
 from qmrdk.config import Calibration, ScanGeometry, Sweep
 from qmrdk.constants import C, FS_NOMINAL
-from qmrdk.dsp.convert import codes_to_volts
+from qmrdk.dsp.convert import as_volts
 from qmrdk.dsp.range import range_spectrum
 from qmrdk.dsp.sar import PhaseHistory, backproject, phase_history
 from qmrdk.dsp.segment import (
@@ -64,8 +64,7 @@ def window_lobes(window, n, over=64):
 
 def _volts(frames):
     """Frames `[K, N]` in volts; a pair of frame sets `[2, K, N]` is differenced."""
-    x = np.asarray(frames)
-    x = codes_to_volts(x) if x.dtype.kind == "u" else x.astype(np.float64)
+    x = as_volts(frames)
     return x[0] - x[1] if x.ndim == 3 else np.atleast_2d(x)
 
 

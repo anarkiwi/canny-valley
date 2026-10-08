@@ -13,11 +13,11 @@ from matplotlib.patches import Circle, Patch, Polygon, Rectangle
 from matplotlib.path import Path
 from matplotlib.transforms import Affine2D
 from PIL import Image
-from scipy.signal import get_window
 from tqdm import tqdm
 
 from qmrdk.dsp.sar import (
     SarImage,
+    aperture_weights,
     backproject,
     form_image,
     phase_history,
@@ -41,6 +41,7 @@ RAIL = "#222222"
 USED = "#e8322b"
 CMAP = "inferno"
 PIXEL = (0.05, 0.25)
+XLABEL = "x along rail (m, + away from home)"
 _NUDGE = 1e-6
 
 
@@ -233,7 +234,7 @@ def draw_scene(
     ax.plot(x_pos[[0, -1]], [0.0, 0.0], color=RAIL, lw=3, solid_capstyle="butt")
     ax.plot(x_pos, np.zeros_like(x_pos), "|", color=RAIL, ms=4)
     handles.append(Line2D([], [], color=RAIL, lw=3, marker="|", label="rail"))
-    ax.set(xlim=extent[:2], ylim=extent[2:], aspect="equal", xlabel="x (m)")
+    ax.set(xlim=extent[:2], ylim=extent[2:], aspect="equal", xlabel=XLABEL)
     ax.set_ylabel("y (m)")
     if legend:
         ax.legend(
@@ -273,7 +274,7 @@ def draw_sar(ax, img: SarImage, dynamic_range=40):
         vmax=0.0,
         aspect="equal",
     )
-    ax.set_xlabel("x (m)")
+    ax.set_xlabel(XLABEL)
     return im
 
 
@@ -331,9 +332,13 @@ def sar_title(lam, length):
     return f"SAR  L = {length:.2f} m,  cross-range res. = {res} m"
 
 
-def _figure(geom, geometry, x_pos, lam, img, dynamic_range, dpi, extent=None):
+def _figure(
+    geom, geometry, x_pos, lam, img, dynamic_range, dpi, extent=None, labels=None
+):
     """Figure with the truth panel (when `geom` is given) and the SAR panel
-    sharing axes; the SAR title needs `x_pos` and `lam`."""
+    sharing axes; the SAR title needs `x_pos` and `lam`. `labels`: optional
+    `(title prefix, y label)`."""
+    prefix, ylabel = labels or ("", "y (m)")
     if extent is None:
         extent = _edges(img.gx, img.gy)
     width = extent[1] - extent[0]
@@ -354,8 +359,9 @@ def _figure(geom, geometry, x_pos, lam, img, dynamic_range, dpi, extent=None):
         overlay_truth(axes[-1], geom, rail_centre(geometry, x_pos),
                       img if np.any(img.image) else None)  # fmt: skip
     axes[-1].set(xlim=extent[:2], ylim=extent[2:])
+    axes[0].set_ylabel(ylabel)
     if x_pos is not None and lam is not None:
-        axes[-1].set_title(sar_title(lam, float(np.ptp(x_pos))))
+        axes[-1].set_title(prefix + sar_title(lam, float(np.ptp(x_pos))))
     fig.colorbar(im, ax=axes[-1], label="dB", shrink=0.7)
     return fig, axes, im
 
@@ -370,12 +376,13 @@ def save_image(
     dynamic_range=40,
     dpi=120,
     extent=None,
+    labels=None,
 ):
     """Static PNG: truth | SAR, or SAR only when `geom` is None. The truth
-    panel needs `geometry` and `x_pos`; the SAR title `x_pos` and `lam`."""
-    _figure(geom, geometry, x_pos, lam, img, dynamic_range, dpi, extent)[0].savefig(
-        path
-    )
+    panel needs `geometry` and `x_pos`; the SAR title `x_pos` and `lam`;
+    `labels` as for `_figure`."""
+    fig = _figure(geom, geometry, x_pos, lam, img, dynamic_range, dpi, extent, labels)
+    fig[0].savefig(path)
 
 
 def write_apng(path, frames, durations):
@@ -414,7 +421,7 @@ def animate(
     hold_ms=3000,
     extent=None,
     background="mean",
-    aperture_window=None,
+    aperture_window="hann",
 ):
     """APNG of truth | SAR while the aperture grows: frame k shows the image
     of the first ceil(k P / frames) positions, accumulated chunk by chunk.
@@ -432,11 +439,7 @@ def animate(
         ).first_up  # fmt: skip
     ph = phase_history(rec.codes, sweep, cal, up, background)
     tx, rx = geometry.antenna_positions(x_pos, cal)
-    w = (
-        np.ones(x_pos.size)
-        if aperture_window is None
-        else get_window(aperture_window, x_pos.size, fftbins=False)
-    )
+    w = aperture_weights(aperture_window, x_pos.size)
     acc = np.zeros((len(gy), len(gx)), dtype=np.complex128)
     img = SarImage(acc, np.asarray(gx), np.asarray(gy), z, up, 0.0)
     fig, axes, im = _figure(

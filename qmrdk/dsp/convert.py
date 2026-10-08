@@ -10,6 +10,12 @@ def codes_to_volts(codes):
     return np.asarray(codes, dtype=np.float64) * (2.0 * A_FS / ADC_MAX) - A_FS
 
 
+def as_volts(x):
+    """Unsigned ADC codes to volts; samples already in volts as float64."""
+    x = np.asarray(x)
+    return codes_to_volts(x) if x.dtype.kind == "u" else x.astype(np.float64)
+
+
 def dbfs(amplitude):
     """Tone amplitude in volts to dB relative to the full-scale amplitude."""
     with np.errstate(divide="ignore"):

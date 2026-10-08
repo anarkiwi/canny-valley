@@ -2,6 +2,8 @@
 
 # pylint: disable=protected-access
 
+import argparse
+import dataclasses
 import importlib
 import importlib.util
 import io
@@ -12,11 +14,13 @@ import types
 import numpy as np
 import pytest
 from PIL import Image
-from sarscene import HW, SWEEP, tiny
+from sarscene import HW, SWEEP, scan, tiny
 
 from qmrdk import cli
-from qmrdk.config import ScanGeometry
+from qmrdk.config import Calibration, ScanGeometry
+from qmrdk.constants import C
 from qmrdk.recording import Recording
+from qmrdk.render import box_peaks
 from qmrdk.sim.devices import SimRadar, SimSled
 from qmrdk.sim.scene import compile_scene
 from qmrdk.sim.scpi import SimBoard
@@ -66,6 +70,97 @@ def test_image_needs_positions(tmp_path, capsys):
     Recording(np.zeros((1, 8), np.uint16), SWEEP, np.zeros(1)).save(path)
     assert cli.main(["sar", "image", str(path), "--out", str(tmp_path / "x.png")]) == 1
     assert "no x_pos" in capsys.readouterr().err
+
+
+@pytest.fixture(name="change", scope="module")
+def fixture_change(tmp_path_factory):
+    """Scan of the tiny scene and an independent-noise rescan with an extra
+    point target, with a calibration file."""
+    path = tmp_path_factory.mktemp("change")
+    scene = tiny()
+    scene["objects"].append({"type": "point", "pos": NEW, "rcs": 1.0})
+    for name, (_, rec) in (("ref", scan(seed=1)), ("new", scan(scene=scene, seed=2))):
+        rec.save(path / f"{name}.npz")
+    HW.calibration(SWEEP).save(path / "cal.json")
+    return path
+
+
+NEW = [-2.0, 8.5, 1.0]
+
+
+def _image(monkeypatch, path, *extra):
+    """(exit code, captured save_image arguments) of `sar image` of new.npz."""
+    saved = []
+    monkeypatch.setattr(cli, "save_image", lambda *a, **k: saved.append((a, k)))
+    argv = ["sar", "image", str(path / "new.npz"), "--out", str(path / "x.png"),
+            "--cal", str(path / "cal.json"), "--pixel", "0.05", "0.05",
+            "--extent", "-4", "4", "2", "12", *extra]  # fmt: skip
+    return cli.main(argv), saved
+
+
+def test_change_image(monkeypatch, change):
+    code, plain = _image(monkeypatch, change)
+    assert code == 0 and plain[0][1]["labels"][0] == ""
+    code, diff = _image(monkeypatch, change, "--reference", str(change / "ref.npz"))
+    assert code == 0 and diff[0][1]["labels"] == ("change ", "y (m)")
+    (_, _, img, _, x_pos, lam, _), _ = diff[0]
+    plain = plain[0][0][2]
+    assert img.gy[0] == 3.0
+    iy, ix = divmod(int(np.argmax(np.abs(img.image))), img.gx.size)
+    cross = lam * np.hypot(NEW[0], NEW[1]) / (2 * np.ptp(x_pos))
+    assert abs(img.gx[ix] - NEW[0]) < cross / 2
+    assert abs(img.gy[iy] - NEW[1]) < C / (4 * SWEEP.bandwidth)
+    old = np.array([[0.0, 5.0], [-1.5, 3.0], [-2.5, 4.0], [2.5, 6.0]])
+
+    def level(im):
+        return box_peaks(im, old, 0.5) + 20 * np.log10(np.abs(im.image).max())
+
+    assert np.all(level(plain) - level(img) > 20)
+
+
+@pytest.mark.parametrize(
+    "change_rec",
+    [
+        lambda r: dataclasses.replace(r, sweep=dataclasses.replace(r.sweep, f1=2.45e9)),
+        lambda r: dataclasses.replace(r, codes=r.codes[:, :1024]),
+        lambda r: dataclasses.replace(r, x_pos=r.x_pos + 2e-6),
+        lambda r: dataclasses.replace(r, x_pos=None),
+    ],
+)
+def test_change_reference_refused(monkeypatch, change, tmp_path, capsys, change_rec):
+    ref = Recording.load(change / "ref.npz")
+    change_rec(ref).save(tmp_path / "ref.npz")
+    code, saved = _image(monkeypatch, change, "--reference", str(tmp_path / "ref.npz"))
+    assert code == 1 and not saved
+    assert "not comparable" in capsys.readouterr().err
+
+
+def test_change_reference_position_tolerance(monkeypatch, change, tmp_path):
+    ref = Recording.load(change / "ref.npz")
+    dataclasses.replace(ref, x_pos=ref.x_pos + 5e-7).save(tmp_path / "ref.npz")
+    code, _ = _image(monkeypatch, change, "--reference", str(tmp_path / "ref.npz"))
+    assert code == 0
+
+
+def test_range_label_without_r_cal(monkeypatch, change, tmp_path):
+    Calibration().save(tmp_path / "cal.json")
+    code, saved = _image(monkeypatch, change, "--cal", str(tmp_path / "cal.json"))
+    assert code == 0 and saved[0][1]["labels"] == ("", "y (m, incl. internal delay)")
+
+
+def test_min_range(monkeypatch, change, capsys):
+    rec = Recording.load(change / "new.npz")
+    args = argparse.Namespace(extent=[-4, 4, 1, 12], min_range=3.0)
+    assert cli._extent(args, None, rec) == (-4.0, 4.0, 3.0, 12.0)
+    args.extent = [-4, 4, 5, 12]
+    assert cli._extent(args, None, rec)[2] == 5.0
+    args.extent = None
+    assert cli._extent(args, tiny(), rec) == (-4.0, 4.0, 3.0, 12.0)
+    args.min_range = -1.0
+    assert cli._extent(args, tiny(), rec)[2] == -0.5
+    code, saved = _image(monkeypatch, change, "--min-range", "12")
+    assert code == 1 and not saved
+    assert "empty extent" in capsys.readouterr().err
 
 
 def test_scan_hardware_unavailable(tmp_path, capsys):
