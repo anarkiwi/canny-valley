@@ -92,6 +92,7 @@ restores memory location 0 without rebooting, `SYST:STAT?` reads
 | `qmrdk scpi CMD [--force]` | guarded raw command or query | off |
 | `qmrdk capture --frames K --n N --out rec.npz [--interval S] [--temperature]` | configure (sweep options as `set`) and record | off |
 | `qmrdk sar scan --out scan.npz [--sled URL] [--origin M] [--settle S] [--manual]` | step the sled across the aperture, one capture per position | off |
+| `qmrdk sar image scan.npz --out img.png [--cal cal.json] [--extent X0 X1 Y0 Y1] [--min-range 3] [--aperture-window hann] [--background mean\|none] [--reference ref.npz]` | backprojection image (signal-processing §11); `--reference` subtracts a scan at the same positions (change image) | n/a |
 | `qmrdk drift rec.npz --cal cal.json [--lines 3] [--out drift.png] [--report drift.json]` | phase drift of a static capture (signal-processing §9.1) | n/a |
 
 Every command takes `--sim` (process-wide simulated board),

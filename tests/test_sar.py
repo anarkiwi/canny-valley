@@ -7,11 +7,13 @@ import pytest
 from scipy.optimize import brentq
 from scipy.signal import get_window
 
+from qmrdk.calib import window_lobes
 from qmrdk.config import Calibration, ScanGeometry, Sweep
 from qmrdk.constants import C
 from qmrdk.dsp.convert import codes_to_volts
 from qmrdk.dsp.sar import (
     _backproject,
+    aperture_weights,
     backproject,
     default_grid,
     form_image,
@@ -100,6 +102,27 @@ def test_point_response(dense, window, aperture):
         wx, cross * _three_db_bins(aperture or "boxcar", x_pos.size), rtol=0.01
     )
     assert img.first_up and img.z == GEOMETRY.height
+
+
+def _cross_range_psl(dense, aperture):
+    x_pos, codes = dense
+    gx = TARGET[0] + 0.01 * np.arange(-400, 401)
+    img = form_image(codes, x_pos, SWEEP, CAL, GEOMETRY, gx, TARGET[1:2],
+                     background=None, aperture_window=aperture)  # fmt: skip
+    a = np.abs(img.image[0])
+    i = int(np.argmax(a))
+    d = np.diff(a)
+    lo, hi = i - np.argmax(d[i - 1 :: -1] <= 0), i + np.argmax(d[i:] >= 0)
+    return 20 * np.log10(max(a[:lo].max(), a[hi + 1 :].max()) / a[i])
+
+
+def test_aperture_taper_sidelobes(dense):
+    n = dense[0].size
+    psl = {w: _cross_range_psl(dense, w) for w in ("boxcar", "hann")}
+    for w, level in psl.items():
+        assert level == pytest.approx(window_lobes(w, n)[2], abs=0.5)
+    assert _cross_range_psl(dense, "none") == pytest.approx(psl["boxcar"])
+    np.testing.assert_array_equal(aperture_weights(None, 3), np.ones(3))
 
 
 @pytest.mark.parametrize("first_up", [True, False])

@@ -42,6 +42,7 @@ qmrdk sar scan --sim --scene yard --out artifacts/scan.npz    # simulated scan r
 qmrdk sar scan --length 1.5 --out artifacts/scan.npz          # board on USB, sled controller ($QMRDK_SLED or USB id)
 qmrdk sar scan --manual --length 1.5 --out artifacts/scan.npz # board on USB, radar moved by hand when prompted
 qmrdk sar image artifacts/scan.npz --cal cal.json --scene yard --out artifacts/scan.png
+qmrdk sar image artifacts/scan2.npz --cal cal.json --reference artifacts/scan.npz --out artifacts/change.png  # change image
 qmrdk calib sim --cal cal.json                                # full calibration procedure on the simulated board
 qmrdk calib {timing,guard,reflector,repeat} --sim --cal cal.json
 qmrdk calib timing --frames-file A.npz                        # on the board, first position

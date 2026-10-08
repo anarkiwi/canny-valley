@@ -11,6 +11,7 @@ import numpy as np
 from qmrdk.config import Calibration, ScanGeometry, Sweep
 from qmrdk.constants import ADC_MAX, FS_NOMINAL
 from qmrdk.device import SWEEP_TYPES, Device, DeviceError
+from qmrdk.dsp.convert import codes_to_volts
 from qmrdk.dsp.sar import form_image
 from qmrdk.radar import HardwareSled, ManualSled, UsbRadar
 from qmrdk.recording import Recording
@@ -81,15 +82,31 @@ def _scan(args):
 
 
 def _extent(args, scene, rec):
-    """Image extent from --extent, the truth scene, the recording or the rail."""
+    """Image extent from --extent, the truth scene, the recording or the rail,
+    starting no nearer than --min-range."""
     if args.extent is not None:
-        return tuple(args.extent)
-    if scene is None and rec.extra.get("extent") is not None:
-        scene = {"ground": {"extent": rec.extra["extent"]}}
-    if scene is None:
-        mid = 0.5 * (rec.x_pos.min() + rec.x_pos.max())
-        scene = {"ground": {"extent": [mid - 10.0, mid + 10.0, 1.0, 20.0]}}
-    return scene_extent(scene, rec.x_pos)
+        x0, x1, y0, y1 = args.extent
+    else:
+        if scene is None and rec.extra.get("extent") is not None:
+            scene = {"ground": {"extent": rec.extra["extent"]}}
+        if scene is None:
+            mid = 0.5 * (rec.x_pos.min() + rec.x_pos.max())
+            scene = {"ground": {"extent": [mid - 10.0, mid + 10.0, 1.0, 20.0]}}
+        x0, x1, y0, y1 = scene_extent(scene, rec.x_pos)
+    return (float(x0), float(x1), max(float(y0), args.min_range), float(y1))
+
+
+def _change(rec, path):
+    """Volts of `rec` minus those of the reference scan at `path`, which must
+    share the sweep, frame shape and positions (to 1 um)."""
+    ref = Recording.load(path)
+    if ref.sweep != rec.sweep:
+        raise ValueError(f"{path}: sweep differs")
+    if ref.codes.shape != rec.codes.shape:
+        raise ValueError(f"{path}: frames {ref.codes.shape} != {rec.codes.shape}")
+    if ref.x_pos is None or np.max(np.abs(ref.x_pos - rec.x_pos)) > 1e-6:
+        raise ValueError(f"{path}: positions differ")
+    return codes_to_volts(rec.codes) - codes_to_volts(ref.codes)
 
 
 def _image(args):
@@ -102,16 +119,26 @@ def _image(args):
     geometry = rec.geometry or ScanGeometry()
     scene = None if args.scene is None else _scene(args.scene)
     extent = _extent(args, scene, rec)
+    if extent[3] <= extent[2]:
+        print(f"empty extent {extent}: check --min-range", file=sys.stderr)
+        return 1
+    data = rec.codes
+    if args.reference is not None:
+        try:
+            data = _change(rec, args.reference)
+        except ValueError as e:
+            print(f"not comparable: {e}", file=sys.stderr)
+            return 1
     gx, gy = grid(extent, args.pixel)
     img = form_image(
-        rec.codes,
+        data,
         rec.x_pos,
         rec.sweep,
         cal,
         geometry,
         gx,
         gy,
-        background=_background(args),
+        background=_background(args, "none" if args.reference else "mean"),
         aperture_window=args.aperture_window,
     )
     geom = None if scene is None else compile_scene(scene, rec.sweep.lam)
@@ -124,13 +151,18 @@ def _image(args):
         rec.sweep.lam,
         args.dynamic_range,
         extent=extent,
+        labels=(
+            "change " if args.reference else "",
+            "y (m)" if cal.r_cal else "y (m, incl. internal delay)",
+        ),
     )
     print(f"{args.out}: first_up={img.first_up} sharpness={img.sharpness:.3g}")
     return 0
 
 
-def _background(args):
-    return None if args.background == "none" else args.background
+def _background(args, default="none"):
+    background = args.background or default
+    return None if background == "none" else background
 
 
 def _json_default(o):
@@ -414,7 +446,18 @@ def parser():
     p.add_argument("--cal", help="calibration JSON")
     p.add_argument("--scene", help="scene (name or JSON) for the truth panel")
     p.add_argument("--extent", type=float, nargs=4, metavar=("X0", "X1", "Y0", "Y1"))
-    _imaging_options(p, "mean", None)
+    p.add_argument(
+        "--min-range",
+        type=float,
+        default=3.0,
+        help="nearest imaged y, m (excludes rail, mount and leakage clutter)",
+    )
+    p.add_argument(
+        "--reference",
+        help="scan .npz at the same positions to subtract (change image; "
+        "--background then defaults to none)",
+    )
+    _imaging_options(p, None, "hann")
     p.set_defaults(func=_image)
     p = sar.add_parser("demo", help="simulated scan, calibration and animation")
     p.add_argument("--scene", default="yard", help="built-in scene name or JSON")

@@ -31,10 +31,10 @@ def tiny():
     return copy.deepcopy(TINY)
 
 
-def scan(length=0.3, n=2048, scene=None):
+def scan(length=0.3, n=2048, scene=None, seed=1):
     """(compiled geometry, recording) of a short simulated scan."""
     geom = compile_scene(tiny() if scene is None else scene, SWEEP.lam)
-    sled = SimSled(seed=1)
-    radar = SimRadar(geom, HW, SWEEP, sled, GEOMETRY, seed=1)
+    sled = SimSled(seed=seed)
+    radar = SimRadar(geom, HW, SWEEP, sled, GEOMETRY, seed=seed)
     rec = run_scan(radar, sled, scan_positions(SWEEP, length), n, GEOMETRY)
     return geom, rec

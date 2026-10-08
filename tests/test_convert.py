@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from qmrdk.dsp.convert import codes_to_volts, dbfs
+from qmrdk.dsp.convert import as_volts, codes_to_volts, dbfs
 
 
 def test_codes_to_volts_end_points():
@@ -22,3 +22,10 @@ def test_dbfs():
         dbfs([2.5, -2.5, 0.25, 2.5j]), [0.0, 0.0, -20.0, 0.0], atol=1e-12
     )
     assert dbfs(0.0) == -np.inf
+
+
+def test_as_volts():
+    codes = np.array([0, 32768, 65535], dtype=np.uint16)
+    np.testing.assert_array_equal(as_volts(codes), codes_to_volts(codes))
+    v = as_volts(np.array([0.5, -1.0], dtype=np.float32))
+    assert v.dtype == np.float64 and v.tolist() == [0.5, -1.0]

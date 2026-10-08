@@ -9,7 +9,7 @@ from scipy.fft import next_fast_len
 from scipy.signal import get_window
 
 from qmrdk.constants import C
-from qmrdk.dsp.convert import codes_to_volts
+from qmrdk.dsp.convert import as_volts
 from qmrdk.dsp.range import centre_frequency, range_axis, range_spectrum
 from qmrdk.dsp.segment import extract_ramps
 
@@ -40,15 +40,14 @@ class SarImage:
 def phase_history(
     codes, sweep, cal, first_up, background="mean", window="hann", zpad=4
 ):
-    """Per-position complex range profiles of frames `codes[P, N]` (§11.2).
+    """Per-position complex range profiles of frames `codes[P, N]` (§11.2),
+    unsigned ADC codes or volts (e.g. a scan minus a reference scan).
 
     `background`: "mean" subtracts the mean ramp over positions, an array
     (mean ramp `[Nu]` or `[P, Nu]` of an empty-scene scan) is subtracted, None
     leaves the ramps unchanged.
     """
-    ramps = extract_ramps(
-        codes_to_volts(codes), cal.n0, cal.nr(sweep), cal.ng, first_up
-    )
+    ramps = extract_ramps(as_volts(codes), cal.n0, cal.nr(sweep), cal.ng, first_up)
     if ramps.shape[-2] == 0:
         raise ValueError("frames hold no complete ramp of each direction")
     mean = ramps.mean(axis=(-3, -2))
@@ -131,6 +130,14 @@ def backproject(ph, tx, rx, gx, gy, z, r_cal, weights=None, out=None):
     return out
 
 
+def aperture_weights(window, n):
+    """Weights `[n]` of the scipy window `window` over positions; ones for
+    None or "none"."""
+    if window is None or window == "none":
+        return np.ones(n)
+    return get_window(window, n, fftbins=False)
+
+
 def sharpness(img):
     """Image sharpness `sum |I|^4 / (sum |I|^2)^2`."""
     p = np.abs(img) ** 2
@@ -147,20 +154,19 @@ def form_image(
     gy,
     z=None,
     background="mean",
-    aperture_window=None,
+    aperture_window="hann",
     window="hann",
     zpad=4,
 ):
-    """Backprojection image of a rail scan `codes[P, N]` at rail positions `x_pos`.
+    """Backprojection image of a rail scan `codes[P, N]` (codes or volts) at
+    rail positions `x_pos`, weighted by `aperture_weights(aperture_window)`.
 
     With `cal.first_up` unknown both ramp directions are imaged and the
     sharper image is kept (§11.2).
     """
     tx, rx = geometry.antenna_positions(x_pos, cal)
     z = geometry.height if z is None else z
-    weights = None
-    if aperture_window is not None:
-        weights = get_window(aperture_window, len(tx), fftbins=False)
+    weights = aperture_weights(aperture_window, len(tx))
     best = None
     for up in (True, False) if cal.first_up is None else (cal.first_up,):
         ph = phase_history(codes, sweep, cal, up, background, window, zpad)
