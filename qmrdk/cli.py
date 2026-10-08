@@ -340,7 +340,7 @@ def _hw_options(p, sweep=False):
     if sweep:
         p.add_argument("--f0", type=float, default=2.4, help="sweep start, GHz")
         p.add_argument("--f1", type=float, default=2.5, help="sweep stop, GHz")
-        p.add_argument("--ramp-time", type=float, default=16.0, help="ramp time, ms")
+        p.add_argument("--ramp-time", type=float, default=8.0, help="ramp time, ms")
         p.add_argument("--type", choices=list(SWEEP_TYPES), default="triangle")
 
 
@@ -395,7 +395,7 @@ def _sweep(args):
 def _sim_options(p, seed=0):
     p.add_argument("--f0", type=float, default=2.4, help="sweep start, GHz")
     p.add_argument("--f1", type=float, default=2.5, help="sweep stop, GHz")
-    p.add_argument("--ramp-time", type=float, default=16.0, help="ramp time, ms")
+    p.add_argument("--ramp-time", type=float, default=8.0, help="ramp time, ms")
     p.add_argument("--length", type=float, default=1.5, help="rail span, m")
     p.add_argument("--dx", type=float, help="position spacing, m (lam_min / 4)")
     p.add_argument("--n", type=int, default=4096, help="samples per capture")

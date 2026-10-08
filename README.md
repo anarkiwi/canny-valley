@@ -16,7 +16,9 @@ The USB driver ([docs/driver.md](docs/driver.md)) configures, captures and
 keeps the RF off outside captures; every board command also runs against a
 simulated board with `--sim`. The sled driver ([docs/sled.md](docs/sled.md))
 steps the radar along the rail for scans and calibration steps 3 and 4, on
-hardware or against the simulated board and scene.
+hardware or against the simulated board and scene; `firmware/sled` is the
+sled controller's Arduino firmware, built, tested and flashed with
+`docker/firmware.Dockerfile`.
 
 ## Install
 
@@ -31,7 +33,7 @@ or build `docker/Dockerfile`.
 ```
 qmrdk list                                                    # boards and *IDN?
 qmrdk info                                                    # settings, lock, temperature, status, errors
-qmrdk set --f0 2.4 --f1 2.5 --ramp-time 16 --type triangle    # configure; leaves the sweep running
+qmrdk set --f0 2.4 --f1 2.5 --ramp-time 8 --type triangle     # configure; leaves the sweep running
 qmrdk rf off                                                  # stop the sweep (RF off)
 qmrdk scpi 'SYST:TEMP?'                                       # guarded raw command
 qmrdk capture --frames 10 --n 4096 --out artifacts/rec.npz    # frames into a recording

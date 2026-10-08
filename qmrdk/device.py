@@ -408,10 +408,10 @@ class Device:
         temp = np.empty(count) if temperature else None
         start = -math.inf
         for i in tqdm(range(count), desc=desc, unit="frame"):
-            time.sleep(max(0.0, start + interval - time.monotonic()))
-            start = time.monotonic()
             if temp is not None:
                 temp[i] = self.temperature()
+            time.sleep(max(0.0, start + interval - time.monotonic()))
+            start = time.monotonic()
             t_host[i], codes[i] = self.capture_timed(n)
         return codes, t_host, temp
 

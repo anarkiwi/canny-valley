@@ -1029,7 +1029,7 @@ def run_step(args):
         if step == "sim":
             cal, report = calibrate_sim(
                 Hardware(),
-                Sweep(),
+                Sweep(ramp_time=args.ramp_time * 1e-3),
                 geometry,
                 args.seed,
                 args.frames,
@@ -1043,14 +1043,21 @@ def run_step(args):
                 if args.sim:
                     hw = Hardware()
                     radar, sled = sim_devices(
-                        hw, Sweep(), geometry, target, args.seed, args.sled_sigma
+                        hw,
+                        Sweep(ramp_time=args.ramp_time * 1e-3),
+                        geometry,
+                        target,
+                        args.seed,
+                        args.sled_sigma,
                     )
                     cal = cal if path and path.is_file() else nominal(hw)
                 elif step in _STATIC and _recorded(args):
                     radar, sled = None, None
                 else:
                     sled = None if step in _STATIC else HardwareSled()
-                    radar = stack.enter_context(UsbRadar(sweep=Sweep()))
+                    radar = stack.enter_context(
+                        UsbRadar(sweep=Sweep(ramp_time=args.ramp_time * 1e-3))
+                    )
                 res = _STEPS[step](args, radar, sled, geometry, target, cal)
             cal, report = res.apply(cal), {step: res.summary()}
     except (NotImplementedError, ValueError, DeviceError) as exc:
@@ -1181,6 +1188,7 @@ _ARGS = (
     ),
     ("--baseline", {"type": float, "help": "tx-rx aperture separation, m"}),
     ("--length", {"type": float, "default": 1.5, "help": "scan length, m"}),
+    ("--ramp-time", {"type": float, "default": 8.0, "help": "ramp time, ms"}),
     ("--height", {"type": float, "default": 1.0, "help": "rail height, m"}),
     ("--seed", {"type": int, "default": 0, "help": "simulation seed"}),
     (
