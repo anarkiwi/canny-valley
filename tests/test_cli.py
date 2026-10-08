@@ -177,6 +177,7 @@ def test_scan_hardware_path(tmp_path, monkeypatch, attach):
     monkeypatch.setattr(cli, "HardwareSled", lambda *a: opened.append(a) or sled)
     path = str(tmp_path / "hw.npz")
     argv = ["sar", "scan", "--out", path, "--length", "0.1", "--n", "1024"]
+    argv += ["--ramp-time", str(SWEEP.ramp_time * 1e3)]
     assert cli.main(argv + ["--height", "1.5"]) == 0
     rec = Recording.load(path)
     assert rec.codes.shape == (5, 1024) and rec.geometry.height == 1.5

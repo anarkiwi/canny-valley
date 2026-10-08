@@ -33,7 +33,7 @@ or build `docker/Dockerfile`.
 ```
 qmrdk list                                                    # boards and *IDN?
 qmrdk info                                                    # settings, lock, temperature, status, errors
-qmrdk set --f0 2.4 --f1 2.5 --ramp-time 16 --type triangle    # configure; leaves the sweep running
+qmrdk set --f0 2.4 --f1 2.5 --ramp-time 8 --type triangle     # configure; leaves the sweep running
 qmrdk rf off                                                  # stop the sweep (RF off)
 qmrdk scpi 'SYST:TEMP?'                                       # guarded raw command
 qmrdk capture --frames 10 --n 4096 --out artifacts/rec.npz    # frames into a recording

@@ -84,6 +84,13 @@ Derived limits:
 | Ramps per capture | `N / Nr` | 11.6 |
 | Range-Doppler unambiguous speed (§8) | `± lam / (8T)` | ± 0.96 m/s |
 
+The CLI and calibration default to `T` = 8 ms (unambiguous range 132 m).
+A shorter ramp moves a target to a higher beat frequency, away from the
+low-frequency noise around the leakage, and raises its SNR for the same
+capture time; it also shortens the unambiguous range, beyond which strong
+returns alias into the image. `tools/ramp_compare.py` measures the trade on
+the rail. Calibration constants `n0` and `fs` are per ramp time.
+
 ## 4. Sweep segmentation
 
 Range processing operates on single ramps. The device provides no sync
