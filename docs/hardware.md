@@ -9,7 +9,7 @@ available; entries marked "unread" need a close-up of the package marking.
 | U4 | Microchip PIC24FJ256GB106-I/PT (64-pin TQFP; 256 KB flash, 16 KB RAM, full-speed USB, remappable peripheral pins) | controller |
 | U1 | Microchip 25AA-series SPI EEPROM, 8-pin (density unread) | non-volatile storage outside the controller, presumably the saved instrument states |
 | U3 | oscillator module | controller clock |
-| J1, XJ1, XJ3 (2×4), XJ2 (2×3) | headers (XJ unpopulated) | unknown |
+| J1, XJ1, XJ3 (2×4), XJ2 (2×3) | headers (XJ unpopulated) | unknown; XJ1 is beside U4 and appears to carry PGEC2/PGED2 and RB8/RB9, see [programming.md](programming.md) |
 | U2 | TSSOP, marking begins `MAX6` | presumed light-bar LED driver |
 | U6 | shielded module | Bluetooth radio |
 | U13 | oscillator module | synthesiser reference (20 MHz per the manual) |
