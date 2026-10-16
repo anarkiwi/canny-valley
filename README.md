@@ -65,6 +65,7 @@ simulated sweep. Scenes are JSON files; built-in scenes are in
 * [Simulation model](docs/simulation.md)
 * [Calibration procedure](docs/calibration.md)
 * [Board notes](docs/hardware.md)
+* [Programming the controller (PICkit 5)](docs/programming.md)
 
 Vendor documentation ([Quonset Microwave QM-RDKIT](https://www.quonsetmicrowave.com/QM-RDKIT-p/qm-rdkit.htm)):
 [user manual](https://www.quonsetmicrowave.com/v/vspfiles/Manuals/QM-RDKIT/QM-RDK%20User%20Manual%20REV%201.2.0.pdf),
