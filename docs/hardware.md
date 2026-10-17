@@ -24,13 +24,16 @@ but unconfirmed.
 | U24 | Mini-Circuits SYM-25DMHW+ | receive mixer (40–2500 MHz, +13 dBm LO class) |
 | U16 | Linear Technology LTC6242 (marking `6242I`), 16-pin SSOP | quad op-amp forming the active IF filter between jumpers J6/J7 and J8/J9 |
 | U10 | Analog Devices AD7694ARMZ (brand `C4K`, A grade, ±6 LSB INL), 16-bit 250 kSPS SAR, 8-lead MSOP | IF digitiser |
-| — | ADT7301-compatible temperature sensor (14-bit, 1/32 °C), location unknown | board temperature |
+| — | ADT7301-compatible temperature sensor (14-bit, 1/32 °C), not on the component side | board temperature |
 | A1, A2, A3 | chip attenuators marked `2` | RF pads |
 | U14 | SOIC-8, unread | presumed loop-filter amplifier |
 | U11 | Linear Technology SOT-23-6 (marking `LTAHG`), with inductor L2 | presumed switching supply |
 | U12 | Linear Technology MSOP-8 (marking `LTDTF`) beside U10 | presumed AD7694 reference (5 V input span) |
 | U8, U9 | SOIC-8, unread | U8 with volume trimmer R18: speaker amplifier, no connection to U4 |
-| U20, U21, U22, U23, U25, U26, U27 | unread | remaining RF chain: amplifiers, splitter, switch |
+| U5 | SOT-23-6 (marking `NFTF`) beside J2/J3 | presumed USB/VIN power switching |
+| U7, U18 | SOT-23 (markings `JZ2?C`, `JW1tB`) in the prototyping areas | unread small analogue parts |
+| U26 | ceramic chip filter (marking `36`) at the RX input | RF filter |
+| U20, U21, U22, U23, U25, U27 | unread | remaining RF chain: amplifiers, splitter, switch |
 
 Signal path: U13 → U15/U17 (swept source) → amplifiers and splitter → TX
 connector, and → LO of U24; RX connector → amplifier → U24 → U16 → ADC → U4.
@@ -220,7 +223,6 @@ connectors P1 and P2 capped.
 ## Open items for a replacement controller program
 
 * ADC reference voltage and U12's part number (measure VREF on U10 pin 1).
-* Temperature sensor location and part.
 * HMC703 register semantics are from the register layout and behaviour;
   check 06h, 07h, 08h, 0Bh and 0Fh against the HMC703 datasheet.
 * The Bluetooth module (§4.7, RB2) is not needed for USB-only control and
