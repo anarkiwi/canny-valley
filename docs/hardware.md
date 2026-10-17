@@ -11,7 +11,7 @@ but unconfirmed.
 | Ref | Part | Role |
 |-----|------|------|
 | U4 | Microchip PIC24FJ256GB106-I/PT (64-pin TQFP; 256 KB flash, 16 KB RAM, full-speed USB, remappable peripheral pins) | controller |
-| U1 | Microchip 25AA1024 SPI EEPROM (128 KB, 256-byte pages; identified by its electronic signature 0x29) | serial number and saved instrument states |
+| U1 | Microchip 25AA1024 SPI EEPROM (128 KB, 256-byte pages; identified by its electronic signature 0x29) | serial number and saved instrument states, written but never read back (§4.4) |
 | U3 | 12 MHz source on OSCI/OSCO (H for frequency, part unread) | controller clock |
 | J1 (1×6, right angle) | Microchip ICSP header | U4 programming and debug, see [programming.md](programming.md) |
 | XJ1 (2×4) | header, unpopulated | odd pins GND; even pins carry U4 RB6–RB9 (§2) |
@@ -155,7 +155,7 @@ the actual frequency. No lock-detect pin is wired to U4.
 
 | Item | Value | Conf |
 |---|---|---|
-| Part | AD7694: pseudo-differential input, IN+ 0 V to VREF relative to IN− (ground sense), straight binary output; VREF up to VDD, 5 V here (5 V span) | H part, M VREF |
+| Part | AD7694: pseudo-differential input, IN+ 0 V to VREF relative to IN− (ground sense), straight binary output; VREF up to VDD. Codes are ratiometric to VREF and nothing in the firmware or host software depends on its value; the 5 V span used for volts (`A_FS`) is the vendor scripts' nominal scale | H part, M scale |
 | Conversion | rising edge of CNV (RD7) starts a conversion and tri-states SDO; falling edge of CNV puts the MSB on SDO; the other 15 bits follow on SCK falling edges (16 SCK1 clocks, no leading zeros) | H |
 | CNV high time | 2 µs on this board, below the AD7694's maximum tCONV of 3.2 µs (VDD 4.75–5.25 V; 4.66 µs below 4.75 V). A replacement program should hold CNV high for at least tCONV | H |
 | Word | 16 bits, unsigned, mid-scale at zero IF (IF biased to VREF/2); all 16 bits are live in recorded frames | H |
@@ -183,15 +183,28 @@ boundaries.
 
 | Address | Content | Conf |
 |---|---|---|
-| `0x0000` + 5k | directory entry k: k, data address (16-bit little-endian), length | H |
-| `0x00FE` | `0x6F` = formatted; any other value → defaults are written | H |
-| `0x0100` | serial number, uint16 little-endian, < 10000 (USB serial string, `*IDN?`) | H |
+| `0x0000` + 5k | directory entry k, 5 bytes: 5k, k, data address (16-bit little-endian), length. Entries: 0 → `0x0100`/2, 2 → `0x0102`/2, 3–8 → `0x010C + 0x14·(k−3)`/22 | H |
+| `0x00FE` | `0x6F` = formatted; any other value → the directory and default records are written | H |
+| `0x0100` | serial number, uint16 little-endian, < 10000 | H |
 | `0x0102` | power-up state: slot number, then `0x01` = valid | H |
 | `0x010C` + … | saved states, 22 bytes: +0 PLL mode (0 fractional, 1 integer), +2 CW frequency (float32, MHz), +6 R (uint16), +8 RF on, +10 sweep start (float32, MHz), +14 sweep stop (float32, MHz), +18 ramp time (float32, ms) | H |
 
-Slot n is written at `0x010C + 0x28·n` but the directory places it at
-`0x010C + 0x14·n` and a 22-byte record does not fit a 20-byte stride; read
-the EEPROM before relying on stored slots. (H; unverified against a dump)
+At power-up the firmware reads only `0x00FE`. The directory-driven read of
+the serial number, power-up state and saved states (0x3320–0x345E) sits
+behind a flag that is set to the immediate 1 just before it is tested
+(`MOV.B #1` at 0x32EE), so it never runs. Consequences (H):
+
+* The USB serial string and `*IDN?` serial are the firmware default `0021`,
+  whatever the EEPROM holds.
+* Saved states live in a RAM table (0x2C46 + 0x16·n) that starts empty at
+  power-up; `LOADSTATE` and the power-up state read that table, never the
+  EEPROM, so nothing saved survives a power cycle.
+* `SAVESTATE n` (n 1–5) writes the record to `0x010C + 0x28·n`, a stride
+  that disagrees with the directory's `0x14`; as the records are never read
+  back, the mismatch has no effect.
+
+A replacement controller program can ignore the EEPROM or define its own
+layout.
 
 ### 4.5 LED driver (U2, MAX6966) on SPI1
 
@@ -212,7 +225,8 @@ and followed by 100 ms: `SET BT SSP 0 0`, `SET BT AUTH * 0000`,
 `SET BT NAME RDK <serial>`, `SET CONTROL BAUD 460800,8n1`, then `RESET`
 (500 ms), with RB2 pulsed around the sequence. The module has to be at
 460 800 baud already for the commands to be understood. The module reports
-link loss as `NO CARRIER 0 ERROR`. (H strings, L RB2)
+link loss as `NO CARRIER 0 ERROR`. (H strings, L RB2) It is not needed for
+USB-only control and can be left unconfigured.
 
 ## Modifications
 
@@ -220,11 +234,3 @@ Present on this board (by the owner): speaker removed; audio tap on a
 two-pin connector at the IF filter output (J7 side) feeding channel 1 of a
 USB audio interface, with its ground lead clipped to the GND test point; MCX
 connectors P1 and P2 capped.
-
-## Open items for a replacement controller program
-
-* ADC reference voltage: measure VREF on U10 pin 1 and U12 OUT (pin 6) to
-  confirm U12 drives it.
-* The Bluetooth module (§4.7, RB2) is not needed for USB-only control and
-  can be left unconfigured.
-* EEPROM slot stride (§4.4), from a dump of U1.
