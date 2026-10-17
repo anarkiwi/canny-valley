@@ -10,7 +10,7 @@ RUN curl -fsSL -o /tmp/xc16.run \
     && /tmp/xc16.run --mode unattended --netservername "" --prefix /opt/xc16 \
     && rm -rf /tmp/xc16.run /opt/xc16/docs /opt/xc16/src
 
-FROM python:3.12-slim AS tools
+FROM python:3.14-slim AS tools
 ARG ARDUINO_CLI=1.5.1 AVR_CORE=1.8.6 ACCELSTEPPER=1.64.0 DOCTEST=2.5.2
 ENV PIP_NO_CACHE_DIR=1 PYTHONDONTWRITEBYTECODE=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
