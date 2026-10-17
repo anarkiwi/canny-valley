@@ -4,7 +4,7 @@
 #include "fmt.h"
 #include "hal.h"
 
-#define F_MIN 2.25
+#define F_MIN 2.30
 #define F_MAX 2.5
 #define NS_PER_PD 50
 #define MODEL "QM4004"
@@ -194,6 +194,55 @@ static scpi_result_t acquire(scpi_t *c, uint32_t lo, uint32_t hi) {
   return core_acquire(v) ? SCPI_RES_OK : (c->cmd_error = TRUE, SCPI_RES_ERR);
 }
 
+/* Bring-up diagnostics: raw synthesiser registers, the LD_SDO level and its
+   edge count. They use SPI2 and Timer2, so only while the clock is stopped. */
+static bool clock_idle(scpi_t *c) {
+  if (core.clock)
+    SCPI_ErrorPush(c, RADAR_ERR_CONFLICT);
+  return !core.clock;
+}
+
+static scpi_result_t reg(scpi_t *c) {
+  uint32_t a, v;
+  if (!clock_idle(c) || uint_param(c, 0, 0x3F, &a) != SCPI_RES_OK ||
+      uint_param(c, 0, 0xFFFFFF, &v) != SCPI_RES_OK)
+    return SCPI_RES_ERR;
+  hal_synth_write((uint8_t)a, v);
+  return SCPI_RES_OK;
+}
+
+static scpi_result_t reg_q(scpi_t *c) {
+  uint32_t a;
+  if (!clock_idle(c) || uint_param(c, 0, 0x3F, &a) != SCPI_RES_OK)
+    return SCPI_RES_ERR;
+  SCPI_ResultUInt32(c, hal_synth_read((uint8_t)a));
+  return SCPI_RES_OK;
+}
+
+static scpi_result_t pin_q(scpi_t *c) {
+  if (!clock_idle(c))
+    return SCPI_RES_ERR;
+  SCPI_ResultUInt32(c, hal_gpo_level());
+  return SCPI_RES_OK;
+}
+
+static scpi_result_t adc_q(scpi_t *c) {
+  if (!clock_idle(c))
+    return SCPI_RES_ERR;
+  SCPI_ResultUInt32(c, hal_adc_slow());
+  return SCPI_RES_OK;
+}
+
+static scpi_result_t edge_q(scpi_t *c) {
+  uint32_t ms, ps = 0;
+  if (!clock_idle(c) || uint_param(c, 1, 1000, &ms) != SCPI_RES_OK)
+    return SCPI_RES_ERR;
+  if (SCPI_ParamUInt32(c, &ps, FALSE) && ps > 3)
+    return range_error(c);
+  SCPI_ResultUInt32(c, hal_edges((uint16_t)ms, (uint8_t)ps));
+  return SCPI_RES_OK;
+}
+
 static scpi_result_t frame(scpi_t *c) { return acquire(c, 1, CORE_FRAME_MAX); }
 
 static scpi_result_t cont(scpi_t *c) { return acquire(c, 0, 0x7FFFFFFFu); }
@@ -222,10 +271,12 @@ static scpi_result_t rate(scpi_t *c) {
   double hz;
   if (!SCPI_ParamDouble(c, &hz, TRUE))
     return SCPI_RES_ERR;
-  if (!(hz >= (double)SYNTH_FREF / (SYNTH_R_MAX + 0.5) &&
-        hz <= (double)SYNTH_FREF / (SYNTH_R_MIN - 0.5)))
+  if (!(hz >= (double)SYNTH_FREF / (SYNTH_R_MAX + SYNTH_R_STEP / 2.0) &&
+        hz <= (double)SYNTH_FREF / (SYNTH_R_MIN - SYNTH_R_STEP / 2.0)))
     return range_error(c);
-  core_set_rate((uint16_t)((double)SYNTH_FREF / hz + 0.5));
+  core_set_rate(
+      (uint16_t)(SYNTH_R_STEP *
+                 (uint16_t)((double)SYNTH_FREF / SYNTH_R_STEP / hz + 0.5)));
   return SCPI_RES_OK;
 }
 
@@ -313,6 +364,11 @@ static const scpi_command_t commands[] = {
     {"CAPTure:BLOCk?", block_q},
     {"CAPTure:RATE", rate},
     {"CAPTure:RATE?", rate_q},
+    {"SYSTem:REGister", reg},
+    {"SYSTem:REGister?", reg_q},
+    {"SYSTem:PIN?", pin_q},
+    {"SYSTem:EDGE?", edge_q},
+    {"SYSTem:ADC?", adc_q},
     SCPI_CMD_LIST_END,
 };
 

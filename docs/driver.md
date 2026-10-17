@@ -7,7 +7,7 @@ Host driver for the QM-RDK board over USB, implementing
 
 | Module | Role |
 |--------|------|
-| `qmrdk/transport.py` | The only module that opens USB resources. Discovery (vendor ID `0x2012`, any product ID, `*IDN?` of the form `Quonset Microwave,QM4004,<serial>,<firmware>`, optional serial number), `write` / `query` with LF termination and per-call timeout, the §3.7 error policy (`SYST:ERR?` drained after every setter, non-zero raises `ScpiError` with code and text, `-500 Power on` consumed), frame flush (`CAPT:FRAM?` until `Not Ready`, in place of device clear), reopen by serial number after re-enumeration. Refuses every command outside the documented set (protocol §3.8), including `CAPT:STRE`; the CV-only commands (protocol §6.5) are allowed only when `Idn.cv` (firmware field starting with `CV`). `query_block` reads one `#6dddddd` binary block (protocol §6.6). |
+| `qmrdk/transport.py` | The only module that opens USB resources. Discovery (vendor ID `0x2012`, any product ID, `*IDN?` of the form `Quonset Microwave,QM4004,<serial>,<firmware>`, optional serial number), `write` / `query` with LF termination and per-call timeout, the §3.7 error policy (`SYST:ERR?` drained after every setter, non-zero raises `ScpiError` with code and text, `-500 Power on` consumed), frame flush (`CAPT:FRAM?` until `Not Ready`, in place of device clear), reopen by serial number after re-enumeration. Refuses every command outside the documented set (protocol §3.8), including `CAPT:STRE`; the CV-only commands (protocol §6.5, including the `SYST:REG`/`PIN`/`EDGE`/`ADC` bring-up diagnostics) are allowed only when `Idn.cv` (firmware field starting with `CV`). `query_block` reads one `#6dddddd` binary block (protocol §6.6). |
 | `qmrdk/device.py` | `Device`: typed commands over a `Transport`. `identify`, `settings` (read-back `Sweep`, reference divider, RF, lock), `configure` with host-side validation, `start` / `stop` / `rf`, `temperature`, `status`, `errors`, `reset`, `save` / `recall` / `restore_factory`, `capture` / `capture_many`, guarded `scpi` passthrough. On CV firmware also `limits` (`Limits`, from `SWEEP:LIM?`), the exact `fs` and `timing()` (`Timing`). |
 | `qmrdk/radar.py` | `UsbRadar`: the `Radar` protocol (`sweep`, `capture(n)`) over a `Device`, used by scans and calibration; `timing` is the device `Timing` of the configured sweep on CV firmware, None on stock. `ManualSled`: the `Sled` protocol by hand; each move prints the position from home (m, cm, mm) and the step on stderr and waits for Enter (`qmrdk sar scan --manual`). |
 | `qmrdk/sled.py` | `HardwareSled`: the `Sled` protocol over the sled controller's serial line protocol ([sled.md](sled.md)). |
@@ -28,7 +28,7 @@ writes the divider only when it changes, sends `SWEEP:START`, waits for
 `FREQ:LOCK?` to read 1 and keeps the read-back sweep in `Device.sweep`.
 
 On CV firmware (protocol §6) the checks use the board's `Limits`: frequencies
-in `f_min`–`f_max` (2.25–2.5 GHz), stop above start (except CW), a ramp time
+in `f_min`–`f_max` (2.3–2.5 GHz on CV firmware), stop above start (except CW), a ramp time
 of at most 65536 ms and at least 4 samples (`round(T fs) >= 4`), a slope
 `B fs / Nr` of at least `slope_min`, and `saw` (type 4) as a fifth kind.
 `Sweep.dwell` (s) applies to `saw` only: at least 4 samples, or 0 to keep the
@@ -82,7 +82,10 @@ The board transmits from power-up. RF is turned off (`SWEEP:STOP`, then
   `KeyboardInterrupt`; a default SIGTERM exits with status 143);
 * the interpreter exits with a board still open (`atexit`).
 
-`Device.leave_rf_on = True` skips the stop on close only. `reset()` sends
+`Device.leave_rf_on = True` skips the stop on close only. `Device.dark = True`
+(CV firmware) sends `SWEEP:START;:POWE:RF 0` as one message, so sweeps and
+captures run with the transmitter muted: bench work without an antenna or
+load. `reset()` sends
 `*RST`, waits for the session to drop, reopens the board and stops the RF it
 powers up with. `*SAV 0` and `SYST:REST` need `force=True`; `*RST` goes
 through `reset()`.
@@ -151,6 +154,14 @@ divider and sample rate (the exact `fs` on CV firmware, plus `timing` =
 (`Calibration.with_timing`). `--interval` sets the minimum time between frame
 starts; `--temperature` reads `SYST:TEMP?` before each frame into the
 recording's `temperature`.
+
+## Bench tools
+
+`tools/bench.py` runs the antenna-free checks of firmware.md's bring-up
+checklist on a CV board with `Device.dark` set (identity, range errors, CW
+lock scan, sweeps, streams at 25 and 40 kHz, read-timeout recovery) and
+writes a JSON report to `artifacts/bench/`. `tools/flash.sh` builds the CV
+firmware at the checked-out commit and programs it ([programming.md](programming.md)).
 
 ## Tests
 

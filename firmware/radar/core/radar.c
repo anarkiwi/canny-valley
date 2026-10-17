@@ -9,7 +9,6 @@ sched_t radar_sched;
 sched_slot_t radar_slots[SCHED_NSLOT];
 
 static sched_t *const S = &radar_sched;
-static const uint8_t gpo_select[] = {9, 7};
 
 static void synth_word(uint8_t reg_int, int32_t nq) {
   hal_synth_write(reg_int, (uint32_t)nq >> 24);
@@ -65,10 +64,10 @@ static void clock_start(uint16_t triggers, uint32_t gap0, uint32_t gap1,
   S->req = arm ? REQ_ARM : REQ_NONE;
   core.rd_slot = 0;
   core.hex_off = 0;
-  hal_synth_write(0x0F, core.gpo | REG0F_EXPORT);
+  hal_synth_write(0x0F, SYNTH_GPO_XTAL | REG0F_EXPORT);
   if (triggers)
     hal_synth_load(0x0E, 1);
-  hal_clock_start();
+  hal_clock_start((uint16_t)(core.rdiv / SYNTH_R_STEP));
   core.clock = true;
 }
 
@@ -151,11 +150,10 @@ void core_reapply(void) {
 
 bool core_set_rate(uint16_t r) {
   bool was = core.running;
-  if (r < SYNTH_R_MIN || r > SYNTH_R_MAX)
+  if (r < SYNTH_R_MIN || r > SYNTH_R_MAX || r % SYNTH_R_STEP)
     return false;
   halt();
   core.rdiv = r;
-  hal_synth_write(0x02, r);
   if (was && !core_start())
     core_stop(false);
   return true;
@@ -206,19 +204,16 @@ static void load_serial(void) {
   core.serial[4] = 0;
 }
 
+/* The reference reaches Timer2: its count through the 1:8 prescaler over
+   CORE_SELFTEST_MS matches f_ref to 2 %. */
 static void self_test(void) {
   uint32_t expect =
-      CORE_SELFTEST_MS * (uint32_t)(SYNTH_FREF / 1000) / core.rdiv;
+      CORE_SELFTEST_MS * (uint32_t)(SYNTH_FREF / 1000) / SYNTH_R_STEP;
   uint32_t got;
-  size_t i;
-  for (i = 0; i < sizeof gpo_select && !core.gpo; i++) {
-    hal_synth_write(0x0F, gpo_select[i] | REG0F_EXPORT);
-    got = hal_edges(CORE_SELFTEST_MS);
-    if ((got > expect ? got - expect : expect - got) <= expect / 50u + 2u)
-      core.gpo = gpo_select[i];
-  }
+  hal_synth_write(0x0F, SYNTH_GPO_XTAL | REG0F_EXPORT);
+  got = hal_edges(CORE_SELFTEST_MS, 1);
   hal_synth_write(0x0F, REG0F_IDLE);
-  core.clock_ok = core.gpo != 0;
+  core.clock_ok = (got > expect ? got - expect : expect - got) <= expect / 50u;
 }
 
 void radar_init(void) {
@@ -235,7 +230,7 @@ void radar_init(void) {
   hal_rf(false);
   hal_synth_read(0x00);
   hal_synth_write(0x01, 0x000002u);
-  hal_synth_write(0x02, core.rdiv);
+  hal_synth_write(0x02, 1);
   hal_synth_write(0x06, synth_reg06(SD_FRAC));
   hal_synth_write(0x07, REG07);
   hal_synth_write(0x07, REG07 | REG07_TRAIN);

@@ -381,16 +381,17 @@ hardware observation.
 ### 6.1 Detection
 
 The firmware field of `*IDN?` starts with `CV`:
-`Quonset Microwave,QM4004,<serial>,CV1.0.0`. The host selects its CV path
-from it (`Idn.cv`).
+`Quonset Microwave,QM4004,<serial>,CV1.0.0-<commit>`, `<commit>` being the
+first 12 hex digits of the build commit, `-dirty` appended for a build with
+uncommitted changes. The host selects its CV path from it (`Idn.cv`).
 
 ### 6.2 Constants
 
 | Name | Value | Meaning |
 |------|-------|---------|
 | `F_REF` | 20 MHz | synthesiser reference, equal to the phase-detector rate f_PD |
-| `R` | default 800, range 500 – 16383 | sample clock divider: `fs = F_REF / R` exactly (25 kHz default, 1220.78 Hz – 40 kHz) |
-| `f_min`, `f_max` | 2.25, 2.5 GHz | frequency range |
+| `R` | default 800, multiple of 8 in 504 – 16376 | reference cycles per sample: `fs = F_REF / R` exactly (25 kHz default, 1221.30 Hz – 39 682.54 Hz) |
+| `f_min`, `f_max` | 2.3, 2.5 GHz | frequency range (the board's PLL does not lock below about 2.295 GHz) |
 | `slope_min` | `F_REF^2 / 2^24` = 23 841 857.91 Hz/s | sweep step of at least one fractional LSB per PD cycle |
 | `M` | 16 PD cycles | programmed ramp shortening (trigger margin) |
 | `D` | 22.5 PD cycles | trigger delay from the sample instant |
@@ -453,11 +454,18 @@ As §2–§3.7, with these differences:
 | `SWEEP:DWEL <ms>` / `SWEEP:DWEL?` | sawtooth rest; default 1 ms; `Nd >= 4` else 201; query realised ms, 6 decimals |
 | `SWEEP:ORIG?` | `<n0>,<first_up>`: commanded first turnaround in samples from acquisition sample 0 (`round(14.5e6 / R)` micro-samples, 6 decimals: `0.018125,1` at R = 800); CW `0.000000,1` |
 | `SWEEP:LIM?` | `<f_min GHz>,<f_max GHz>,<slope_min Hz/s>,<t_quantum ms>,<t_min ms>` with `t_quantum = 1 / fs`, `t_min = 4 / fs` |
-| `CAPT:RATE <Hz>` / `CAPT:RATE?` | `R = round(F_REF / Hz)` in 500 – 16383 else 201; query `F_REF / R`, 6 decimals; restarts a running sweep |
+| `CAPT:RATE <Hz>` / `CAPT:RATE?` | `R = 8 * round(F_REF / (8 * Hz))` in 504 – 16376 else 201 (40000 → R = 504); query `F_REF / R`, 6 decimals; restarts a running sweep |
 | `CAPT:CONT <n>` | start an acquisition of `n` samples, 0 – 2147483647 (0: until `CAPT:ABOR`); read with `CAPT:BLOC?` only |
 | `CAPT:ABOR` | stop the acquisition and discard pending data |
 | `CAPT:BLOC?` | next block (§6.6); deferred while the acquisition runs and no block is complete; `#6000000` when nothing is pending |
 | `POWE:RF:TIME <s>` / `POWE:RF:TIME?` | RF auto-mute after `s` s without a host message while no acquisition runs; 0 disables; default 30; 0 – 3600 |
+| `SYST:REG <addr>,<value>` / `SYST:REG? <addr>` | raw synthesiser register write / read (addr 0 – 63, value 0 – 2^24 - 1); bring-up only |
+| `SYST:PIN?` | level of the synthesiser's LD_SDO at the controller, `0`/`1` |
+| `SYST:EDGE? <ms>[,<ps>]` | LD_SDO rising edges over 1 – 1000 ms through prescaler 1, 8, 64, 256 (`ps` 0 – 3), raw count |
+| `SYST:ADC?` | one ADC code read with the stock firmware's timing |
+
+The `SYST` diagnostics return -221 `"Settings conflict"` while the sample
+clock runs (acquisitions and continuous sweeps).
 
 The host reads `CAPT:RATE?`, `SWEEP:LIM?` and `SWEEP:ORIG?` but does not set
 the rate or the auto-mute; `qmrdk scpi` can.

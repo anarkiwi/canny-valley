@@ -82,30 +82,45 @@ with it set, program memory reads back as zeros.
 
 The CV firmware ([firmware.md](firmware.md)) is built as
 `firmware/build/radar/radar.hex` (`make compile` in
-`docker/firmware.Dockerfile`, or the `radar-firmware` CI artifact). Copy it
-next to the stock dump, then, with the PICkit and board connected as in steps
-1–3 above:
+`docker/firmware.Dockerfile`, or the `radar-firmware` CI artifact).
+`tools/flash.sh` builds it at the checked-out commit, keeps it as
+`untracked/mplab/radar-<commit>.hex` and programs it; `tools/flash.sh <file>`
+programs an image already in `untracked/mplab/`. By hand, with the PICkit and
+board connected as in steps 1–3 above:
 
 ```
 cp firmware/build/radar/radar.hex untracked/mplab/
 pk5 -OK -I                          # identify, as above
-pk5 -M -F/out/radar.hex -Y          # erase, program all memory, verify
+pk5 -M -F/out/radar.hex -Y -OL      # erase, program all memory, verify, run
 ```
 
 `-M` programs program memory and the configuration words from the hex file
 (the image carries its own configuration words, same oscillator settings as
-stock) and `-Y` verifies. Unplug the PICkit, power-cycle the board and check
-`qmrdk list` shows firmware `CV1.0.0`, then run the bring-up checklist of
-firmware.md.
+stock), `-Y` verifies and `-OL` releases the target from reset. `-OL` only
+works in the same session as `-M`: otherwise the PICkit keeps MCLR low and
+the board does not enumerate until the PICkit is unplugged and the board
+power-cycled. Then check `qmrdk list` shows firmware `CV1.0.0-<commit>` for
+the flashed build and run the bring-up checklist of firmware.md.
+
+## Debugging
+
+`docker build --build-arg IDE=1 -f docker/mplab.Dockerfile -t canny-valley-mdb
+<installer dir>` adds the MPLAB X IDE and its command-line debugger
+`mdb.sh`. A `RADAR_DEBUG=1` image ([firmware.md](firmware.md)) can then be
+programmed, run, halted and inspected (`backtrace`, `print`) from an mdb
+script with `hwtool PICkit5` and `set poweroptions.powerenable false` (the
+board powers itself). Leave the debug session with a normal image
+programmed.
 
 ## Restoring the stock firmware
 
 ```
-pk5 -M -F/out/qmrdk-u4.hex -Y
+pk5 -M -F/out/qmrdk-u4.hex -Y -OL
 ```
 
-programs the dump read in step 4 back, configuration words included; after a
-power cycle `*IDN?` reports `V1.1.0` again.
+programs the dump read in step 4 back, configuration words included;
+`*IDN?` then reports `V1.1.0` again. The stock firmware switches RF on at
+power-up.
 
 ## XJ1
 

@@ -21,6 +21,24 @@ PIC_CFLAGS = -mcpu=$(RADAR_MCU) -std=gnu99 $(PIC_OPT) -fno-short-double \
 PIC_LDFLAGS = -mcpu=$(RADAR_MCU) -Wl,--script=p$(RADAR_MCU).gld,--heap=0 \
 	-Wl,--gc-sections,--report-mem,-Map=$(RADAR_OUT)/radar.map
 
+# RADAR_DEBUG=1 builds for an in-circuit debugger (mdb with a PICkit 5):
+# debug info and the memory the debug executive reserves.
+ifeq ($(RADAR_DEBUG),1)
+PIC_CFLAGS += -g -D__DEBUG
+PIC_LDFLAGS += -Wl,--defsym=__MPLAB_BUILD=1,--defsym=__MPLAB_DEBUG=1 \
+	-Wl,--defsym=__DEBUG=1,--defsym=__MPLAB_DEBUGGER_PK5=1
+endif
+
+# Commit identifying the image in *IDN? and SYST:FIRM?; the stamp rebuilds
+# cmds.o whenever it changes.
+RADAR_COMMIT ?= unknown
+$(RADAR_OUT)/commit: FORCE
+	mkdir -p $(dir $@)
+	echo '$(RADAR_COMMIT)' | cmp -s - $@ || echo '$(RADAR_COMMIT)' > $@
+$(RADAR_OUT)/core/cmds.o: $(RADAR_OUT)/commit
+$(RADAR_OUT)/core/cmds.o: PIC_CFLAGS += -DRADAR_COMMIT=$(RADAR_COMMIT)
+FORCE:
+
 # -O2 (available in the free edition) inlines the scheduler into the ISR.
 $(RADAR_OUT)/pic/hal.o: PIC_OPT = -O2
 
@@ -40,6 +58,18 @@ $(RADAR_OUT)/tusb/%.o: $(TUSB_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(XC16)/xc16-gcc $(PIC_CFLAGS) -DNDEBUG -w -c -o $@ $<
 
+# TinyUSB fixes (patches/tinyusb/<path>.patch) are compiled from patched
+# copies, so the submodule stays pristine.
+TUSB_PATCHES = $(patsubst $(RADAR_DIR)/patches/tinyusb/%.patch,%, \
+	$(shell find $(RADAR_DIR)/patches/tinyusb -name '*.patch'))
+$(RADAR_OUT)/tusb-src/%: $(TUSB_DIR)/% $(RADAR_DIR)/patches/tinyusb/%.patch
+	@mkdir -p $(dir $@)
+	patch -s -o $@ $< $(word 2,$^)
+$(foreach f,$(TUSB_PATCHES),$(eval \
+$(RADAR_OUT)/tusb/$(f:.c=.o): $(RADAR_OUT)/tusb-src/$(f) ; \
+	@mkdir -p $$(dir $$@) && $(XC16)/xc16-gcc $$(PIC_CFLAGS) -DNDEBUG -w \
+	-I$(TUSB_DIR)/$(dir $(f)) -c -o $$@ $$<))
+
 $(RADAR_OUT)/radar.elf: $(RADAR_OBJ)
 	$(XC16)/xc16-gcc $(PIC_LDFLAGS) -o $@ $^
 
@@ -48,7 +78,7 @@ $(RADAR_OUT)/radar.hex: $(RADAR_OUT)/radar.elf
 
 $(RADAR_OUT)/isr.lst: $(RADAR_OUT)/radar.elf
 	$(XC16)/xc16-objdump -d $< | \
-		awk '/^[0-9a-f]+ <[^.]/{p=/<__INT1Interrupt>:/} p' > $@
+		awk '/^[0-9a-f]+ <[^.]/{p=/<__T2Interrupt>:/} p' > $@
 	@test -s $@
 
 radar-compile: $(RADAR_OUT)/radar.hex $(RADAR_OUT)/isr.lst

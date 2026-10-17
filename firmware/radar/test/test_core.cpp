@@ -27,9 +27,11 @@ struct Board {
   std::vector<uint8_t> eeprom = std::vector<uint8_t>(0x200, 0xFF);
   uint32_t lock = 2, ms = 0, sample = 0, trig_reg = 0, resets = 0;
   uint16_t temp = 800;
-  uint8_t good_gpo = 9, spi2 = 0;
+  uint16_t period = 0;
+  uint8_t good_gpo = 8, spi2 = 0;
   Frame pending{};
-  bool rf = true, clock = false, eeprom_ok = true, polled = false;
+  bool rf = true, clock = false, eeprom_ok = true, polled = false,
+       gpo_level = false;
 
   static uint16_t code(uint32_t i) { return (uint16_t)(i * 7919u + 13u); }
 
@@ -60,7 +62,7 @@ struct Board {
     sample++;
   }
 
-  uint32_t per_ms() const { return 20000u / regs.at(0x02); }
+  uint32_t per_ms() const { return 2500u / period; }
 
   void tick() {
     if (clock)
@@ -209,9 +211,10 @@ void hal_synth_load(uint8_t reg, uint32_t data) {
   B->pending = {reg, data};
   B->spi2 = 1;
 }
-void hal_clock_start(void) {
+void hal_clock_start(uint16_t period) {
   REQUIRE(!B->clock);
-  REQUIRE((B->regs[0x0F] & 0xC0) == 0xC0);
+  REQUIRE(B->regs[0x0F] == (8u | 0xC0u));
+  B->period = period;
   B->clock = true;
   B->sample = 0;
   B->triggers.clear();
@@ -222,10 +225,18 @@ void hal_clock_stop(void) {
   B->spi2 = 0;
   B->clock = false;
 }
-uint32_t hal_edges(uint16_t ms) {
+uint32_t hal_edges(uint16_t ms, uint8_t ps) {
   REQUIRE(!B->clock);
   uint32_t sel = B->regs[0x0F] & 0x1F;
-  return sel == B->good_gpo ? ms * B->per_ms() : ms * 20000u;
+  return sel == B->good_gpo ? (ms * 20000u) >> 3 * ps : 0;
+}
+uint16_t hal_adc_slow(void) {
+  REQUIRE(!B->clock);
+  return Board::code(B->sample);
+}
+bool hal_gpo_level(void) {
+  REQUIRE(!B->clock);
+  return B->gpo_level;
 }
 uint16_t hal_temp_raw(void) {
   REQUIRE(!B->clock);
@@ -266,7 +277,7 @@ TEST_CASE("frequency words, sweep plan and register values") {
   synth_plan_t p;
   CHECK(synth_nq(2.4) == 120 * 16777216L);
   CHECK(synth_hz(synth_nq(2.4)) == 2400000000u);
-  CHECK(synth_hz(SYNTH_NQ_MIN) == 2250000000u);
+  CHECK(synth_hz(SYNTH_NQ_MIN) == 2300000000u);
   CHECK(synth_hz(SYNTH_NQ_MAX) == 2500000000u);
   CHECK(synth_div_round(7, 2) == 4);
   CHECK(synth_div_round(-7, 2) == -4);
@@ -290,15 +301,14 @@ TEST_CASE("frequency words, sweep plan and register values") {
   CHECK_FALSE(synth_plan(&p, 2.4, 2.5, 0.1, 1.0, 800));
   CHECK_FALSE(synth_plan(&p, 2.4, 2.5, 0.0, 1.0, 800));
   CHECK(synth_plan(&p, 2.4, 2.5, 0.16, 1.0, 800));
-  CHECK_FALSE(synth_plan(&p, 2.25, 2.5, 0.16, 1.0, 16383));
+  CHECK_FALSE(synth_plan(&p, 2.3, 2.5, 0.16, 1.0, 16383));
   CHECK(synth_samples(-1.0, 800) == 0);
 
   CHECK(synth_cp_offset(synth_nq(2.375)) == 33);
-  CHECK(synth_cp_offset(synth_nq(2.25)) == 34);
+  CHECK(synth_cp_offset(synth_nq(2.3)) == 34);
   CHECK(synth_cp_offset(synth_nq(2.5)) == 33);
   CHECK(synth_reg09(synth_nq(2.45)) == (0x803264u | 33u << 14 | 1u << 21));
-  CHECK(synth_reg06(SD_TWOWAY) == (0x201D1Fu | 6u << 5));
-  CHECK((REG06_BASE >> 21 & 1u) == 1u);
+  CHECK(synth_reg06(SD_TWOWAY) == (0x001D1Fu | 6u << 5));
   CHECK((REG07 >> 21 & 1u) == 1u);
   CHECK(synth_mode(TYPE_CW) == SD_FRAC);
   CHECK(synth_mode(TYPE_RAMP) == SD_ONEWAY);
@@ -315,21 +325,22 @@ TEST_CASE_FIXTURE(Fixture, "power-up programming and identity") {
   REQUIRE(order.size() > 12);
   CHECK(order[0] == 0x01);
   CHECK(order[1] == 0x02);
-  CHECK(board.writes[1].data == 800);
+  CHECK(board.writes[1].data == 1);
   CHECK(order[2] == 0x06);
   CHECK(board.writes[2].data == synth_reg06(SD_FRAC));
   CHECK(order[3] == 0x07);
   CHECK(board.writes[3].data == REG07);
   CHECK(board.writes[4].data == (REG07 | REG07_TRAIN));
   CHECK(board.regs[0x0F] == REG0F_IDLE);
-  CHECK(q("*IDN?") == "Quonset Microwave,QM4004,0021,CV1.0.0");
+  CHECK(q("*IDN?") ==
+        "Quonset Microwave,QM4004,0021,CV1.0.0-0123456789ab-dirty");
   CHECK(err() == "0,\"No error\"");
   CHECK(q("SYST:STAT?") == "0,\"Operational\"");
   CHECK(q("SYST:TEMP?") == "25.00");
   CHECK(q("SYST:IDEN?") == "QM4004");
   CHECK(q("SYST:MODNUM?") == "QM4004");
   CHECK(q("SYST:SERNUM?") == "0021");
-  CHECK(q("SYST:FIRM?") == "CV1.0.0");
+  CHECK(q("SYST:FIRM?") == "CV1.0.0-0123456789ab-dirty");
   CHECK(q("SYST:VERS?") == "1999.0");
   CHECK(q("*TST?") == "0");
   CHECK(std::string(radar_serial()) == "0021");
@@ -346,7 +357,8 @@ TEST_CASE("serial number from the EEPROM") {
   board.eeprom[0x100] = 42;
   board.eeprom[0x101] = 0;
   radar_init();
-  CHECK(q("*IDN?") == "Quonset Microwave,QM4004,0042,CV1.0.0");
+  CHECK(q("*IDN?") ==
+        "Quonset Microwave,QM4004,0042,CV1.0.0-0123456789ab-dirty");
   board.eeprom[0x100] = 0x10;
   board.eeprom[0x101] = 0x27;
   radar_init();
@@ -370,7 +382,7 @@ TEST_CASE_FIXTURE(Fixture, "power-up settings and limits") {
   CHECK(q("CAPT:RATE?") == "25000.000000");
   CHECK(q("SWEEP:ORIG?") == "0.018125,1");
   CHECK(q("SWEEP:LIM?") ==
-        "2.250000000,2.500000000,23841857.910156,0.040000,0.160000");
+        "2.300000000,2.500000000,23841857.910156,0.040000,0.160000");
   CHECK(err() == "0,\"No error\"");
 }
 
@@ -379,7 +391,7 @@ TEST_CASE_FIXTURE(Fixture, "out-of-range parameters return 201") {
        {"SWEEP:FREQSTAR 2.6", "SWEEP:FREQSTOP 2.2", "SWEEP:RAMPTIME 0",
         "SWEEP:RAMPTIME 0.1", "SWEEP:RAMPTIME 65537", "SWEEP:DWEL 0.1",
         "SWEEP:TYPE 5", "FREQ:REF:DIV 257", "FREQ:REF:DIV 0", "CAPT:FRAM 4097",
-        "CAPT:FRAM 0", "CAPT:RATE 45000", "CAPT:RATE 1000",
+        "CAPT:FRAM 0", "CAPT:RATE 45000", "CAPT:RATE 1221",
         "POWE:RF:TIME 4000"}) {
     send(std::string(cmd) + "\n");
     CHECK_MESSAGE(err() == "201,\"Out of range\"", cmd);
@@ -404,7 +416,8 @@ TEST_CASE_FIXTURE(Fixture, "decimal ramp times are realised in samples") {
   CHECK(board.regs[0x0A] == ((uint32_t)-524 & 0xFFFFFFu));
   send("FREQ:REF:DIV 4\n");
   CHECK(q("FREQ:REF:DIV?") == "4");
-  CHECK(board.regs[0x02] == 800);
+  CHECK(board.regs[0x02] == 1);
+  CHECK(board.period == 100);
   CHECK(err() == "0,\"No error\"");
 }
 
@@ -415,7 +428,7 @@ TEST_CASE_FIXTURE(Fixture, "triangle sweep runs from the sample clock") {
   CHECK(board.rf);
   CHECK(board.clock);
   CHECK(board.regs[0x06] == synth_reg06(SD_TWOWAY));
-  CHECK((board.regs[0x0F] & 0x1F) == 9);
+  CHECK(board.regs[0x0F] == (8u | 0xC0u));
   CHECK(board.regs[0x09] == synth_reg09(synth_nq(2.45)));
   synth_plan_t p;
   REQUIRE(core_plan(&p));
@@ -617,17 +630,18 @@ TEST_CASE_FIXTURE(Fixture, "lock is latched before the sample clock starts") {
 TEST_CASE_FIXTURE(Fixture, "sample rate selection") {
   send("SWEEP:START\n");
   send("CAPT:RATE 40000\n");
-  CHECK(board.regs[0x02] == 500);
+  CHECK(board.period == 63);
   CHECK(board.clock);
-  CHECK(q("CAPT:RATE?") == "40000.000000");
-  CHECK(q("SWEEP:ORIG?") == "0.029000,1");
+  CHECK(q("CAPT:RATE?") == "39682.539683");
+  CHECK(q("SWEEP:ORIG?") == "0.028770,1");
   CHECK(q("SWEEP:LIM?") ==
-        "2.250000000,2.500000000,23841857.910156,0.025000,0.100000");
-  CHECK(q("SWEEP:RAMPTIME?") == "16.000000");
-  send("CAPT:RATE 1221\n");
-  CHECK(q("CAPT:RATE?") == "1221.001221");
+        "2.300000000,2.500000000,23841857.910156,0.025200,0.100800");
+  CHECK(q("SWEEP:RAMPTIME?") == "16.002000");
+  send("CAPT:RATE 1222\n");
+  CHECK(q("CAPT:RATE?") == "1221.896383");
+  CHECK(core_set_rate(SYNTH_R_DEF + 1) == false);
   CHECK(core_set_rate(SYNTH_R_MAX + 1) == false);
-  send("SWEEP:STOP;:SWEEP:RAMPTIME 0.2;:CAPT:RATE 1221\n");
+  send("SWEEP:STOP;:SWEEP:RAMPTIME 0.2;:CAPT:RATE 1222\n");
   CHECK(err() == "201,\"Out of range\"");
 }
 
@@ -649,11 +663,10 @@ TEST_CASE_FIXTURE(Fixture, "RF auto-mute after host silence") {
 TEST_CASE("sample-clock self-test") {
   Board board;
   B = &board;
-  board.good_gpo = 7;
   radar_init();
   CHECK(err() == "0,\"No error\"");
   send("SWEEP:START\n");
-  CHECK((board.regs[0x0F] & 0x1F) == 7);
+  CHECK(board.regs[0x0F] == (8u | 0xC0u));
   Board fail;
   B = &fail;
   fail.good_gpo = 0;
@@ -668,10 +681,37 @@ TEST_CASE("sample-clock self-test") {
   CHECK(err() == "0,\"No error\"");
 }
 
+TEST_CASE_FIXTURE(Fixture, "bring-up diagnostics while the clock is stopped") {
+  send("SYST:REG 15,193\n");
+  CHECK(board.regs[0x0F] == 193);
+  board.regs[0x05] = 0x654321;
+  CHECK(q("SYST:REG? 5") == std::to_string(0x654321));
+  board.gpo_level = true;
+  CHECK(q("SYST:PIN?") == "1");
+  CHECK(q("SYST:ADC?") == std::to_string(Board::code(board.sample)));
+  CHECK(q("SYST:EDGE? 20") == "0");
+  board.regs[0x0F] = 8;
+  CHECK(q("SYST:EDGE? 20") == "400000");
+  CHECK(q("SYST:EDGE? 20,1") == "50000");
+  for (const char *cmd :
+       {"SYST:REG 64,0", "SYST:REG 1,16777216", "SYST:REG? 64", "SYST:EDGE? 0",
+        "SYST:EDGE? 1001", "SYST:EDGE? 20,4"}) {
+    send(std::string(cmd) + "\n");
+    CHECK_MESSAGE(err() == "201,\"Out of range\"", cmd);
+  }
+  send("SWEEP:START\n");
+  REQUIRE(board.clock);
+  for (const char *cmd : {"SYST:REG 15,1", "SYST:REG? 18", "SYST:PIN?",
+                          "SYST:EDGE? 20", "SYST:ADC?"}) {
+    send(std::string(cmd) + "\n");
+    CHECK_MESSAGE(err() == "-221,\"Settings conflict\"", cmd);
+  }
+}
+
 TEST_CASE_FIXTURE(Fixture, "message framing and output handling") {
   radar_rx((const uint8_t *)"*ID", 3, false);
   radar_rx((const uint8_t *)"N?", 2, true);
-  CHECK(read() == "Quonset Microwave,QM4004,0021,CV1.0.0\n");
+  CHECK(read() == "Quonset Microwave,QM4004,0021,CV1.0.0-0123456789ab-dirty\n");
   send("SWEEP:TYPE?");
   CHECK(read() == "2\n");
   send("*IDN?\n");

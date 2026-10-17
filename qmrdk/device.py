@@ -307,6 +307,7 @@ class Device:  # pylint: disable=too-many-public-methods
     ):
         self.transport = Transport(resource, serial, manager, timeout)
         self.leave_rf_on = False
+        self.dark = False
         self.running = False
         self.limits, self.fs = None, None
         _register(self)
@@ -431,8 +432,11 @@ class Device:  # pylint: disable=too-many-public-methods
         return self.sweep
 
     def start(self) -> None:
-        """`SWEEP:START` and wait for PLL lock; RF off and LockError on timeout."""
-        self.transport.command("SWEEP:START")
+        """`SWEEP:START` and wait for PLL lock; RF off and LockError on timeout.
+        With `dark` the same message switches the RF off again, so the sweep
+        and captures run with the transmitter muted (bench use without an
+        antenna or load)."""
+        self.transport.command("SWEEP:START;:POWE:RF 0" if self.dark else "SWEEP:START")
         deadline = time.monotonic() + LOCK_TIMEOUT
         while self.transport.query("FREQ:LOCK?") != "1":
             if time.monotonic() > deadline:

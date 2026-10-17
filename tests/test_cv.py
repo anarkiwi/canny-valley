@@ -103,7 +103,7 @@ def test_power_up(res, board):
         "SWEEP:TYPE?": "2",
         "SWEEP:DWEL?": "1.000000",
         "SWEEP:ORIG?": "0.018125,1",
-        "SWEEP:LIM?": "2.250000000,2.500000000,23841857.910156,0.040000,0.160000",
+        "SWEEP:LIM?": "2.300000000,2.500000000,23841857.910156,0.040000,0.160000",
         "CAPT:RATE?": "25000.000000",
         "POWE:RF?": "0",
         "POWE:RF:TIME?": "30",
@@ -122,7 +122,7 @@ def test_power_up(res, board):
 @pytest.mark.parametrize(
     "cmd, code, query, value",
     [
-        ("SWEEP:FREQSTAR 2.25", None, "SWEEP:FREQSTAR?", "2.250000000"),
+        ("SWEEP:FREQSTAR 2.3", None, "SWEEP:FREQSTAR?", "2.300000000"),
         ("SWEEP:FREQSTAR 2.2", 201, "SWEEP:FREQSTAR?", "2.400000000"),
         ("SWEEP:FREQSTOP 2.51", 201, "SWEEP:FREQSTOP?", "2.499945068"),
         ("SWEEP:RAMPTIME 8.3", None, "SWEEP:RAMPTIME?", "8.320000"),
@@ -132,7 +132,7 @@ def test_power_up(res, board):
         ("SWEEP:TYPE 5", 201, "SWEEP:TYPE?", "2"),
         ("SWEEP:DWEL 0.1", 201, "SWEEP:DWEL?", "1.000000"),
         ("SWEEP:DWEL 2.51", None, "SWEEP:DWEL?", "2.520000"),
-        ("CAPT:RATE 40000", None, "SWEEP:ORIG?", "0.029000,1"),
+        ("CAPT:RATE 40000", None, "SWEEP:ORIG?", "0.028770,1"),
         ("CAPT:RATE 50000", 201, "CAPT:RATE?", "25000.000000"),
         ("CAPT:RATE 1000", 201, "CAPT:RATE?", "25000.000000"),
         ("POWE:RF:TIME 0", None, "POWE:RF:TIME?", "0"),
@@ -150,16 +150,19 @@ def test_settings(res, cmd, code, query, value):
 
 
 def test_rate_limits(res):
+    errs(res)
     res.write("CAPT:RATE 40000")
-    assert res.query("CAPT:RATE?") == "40000.000000"
-    assert res.query("SWEEP:LIM?").endswith(",0.025000,0.100000")
-    res.write("CAPT:RATE 1220.78")
-    assert res.query("CAPT:RATE?") == f"{F_REF / 16383:.6f}"
+    assert res.query("CAPT:RATE?") == f"{F_REF / 504:.6f}"
+    assert res.query("SWEEP:LIM?").endswith(",0.025200,0.100800")
+    res.write("CAPT:RATE 1222")
+    assert res.query("CAPT:RATE?") == f"{F_REF / 16368:.6f}"
+    res.write("CAPT:RATE 1221")
+    assert errs(res) == [201]
 
 
 @pytest.mark.parametrize(
     "f0, f1, ramp",
-    [(2.4e9, 2.5e9, 16e-3), (2.25e9, 2.31e9, 7.3e-3), (2.47e9, 2.3e9, 1.1e-3)],
+    [(2.4e9, 2.5e9, 16e-3), (2.3e9, 2.36e9, 7.3e-3), (2.47e9, 2.3e9, 1.1e-3)],
 )
 def test_realised_sweep(res, board, f0, f1, ramp):
     res.write(f"SWEEP:FREQSTAR {f0 / 1e9:.9f};SWEEP:FREQSTOP {f1 / 1e9:.9f}")
@@ -186,6 +189,13 @@ def test_start_lock_and_types(res, board):
     assert res.query("FREQ:LOCK?") == "1"
     res.write("*RST")
     assert board.boot == 1 and not board.rf
+
+
+def test_dark_sweeps_and_captures_with_rf_off(dev, board):
+    dev.dark = True
+    dev.configure(Sweep(ramp_time=8e-3))
+    assert dev.running and not board.rf and dev.transport.query("POWE:RF?") == "0"
+    assert dev.capture(3000).shape == (3000,) and not board.rf
 
 
 def read_block(res, timeout=10_000):
@@ -337,7 +347,7 @@ def test_connect(board):
     with Device(manager=SimManager([board])) as dev:
         assert board.acq is None and dev.boot_errors == [(-500, "Power on")]
         assert board.log[2:5] == ["CAPT:ABOR", "CAPT:FRAM?", "SYST:ERR?"]
-        assert dev.fs == FS and dev.limits.f_min == 2.25e9
+        assert dev.fs == FS and dev.limits.f_min == 2.3e9
         assert dev.limits.t_quantum == pytest.approx(1 / FS)
         assert dev.sweep.ramp_time == 16e-3 and not dev.running
         s = dev.settings()
@@ -356,8 +366,8 @@ def test_connect(board):
     "sweep, match",
     [
         (Sweep(kind="auto"), "kind"),
-        (Sweep(f0=2.2e9), "outside 2.25..2.5"),
-        (Sweep(f1=2.51e9, kind="cw"), "outside 2.25..2.5"),
+        (Sweep(f0=2.2e9), "outside 2.3..2.5"),
+        (Sweep(f1=2.51e9, kind="cw"), "outside 2.3..2.5"),
         (Sweep(ramp_time=0.1e-3), "outside 0.16..65536"),
         (Sweep(ramp_time=70.0), "outside 0.16..65536"),
         (Sweep(f0=2.5e9, f1=2.4e9), "above start"),
@@ -386,7 +396,7 @@ def test_validate_stock_refuses_saw():
     "sweep",
     [
         Sweep(ramp_time=8e-3),
-        Sweep(f0=2.25e9, f1=2.31e9, ramp_time=7.3e-3, kind="tri"),
+        Sweep(f0=2.3e9, f1=2.36e9, ramp_time=7.3e-3, kind="tri"),
         Sweep(f0=2.3e9, kind="cw"),
         Sweep(ramp_time=0.16e-3, kind="ramp"),
         Sweep(f1=2.4001e9, ramp_time=4e-3),
@@ -463,7 +473,7 @@ def test_capture_gives_up_with_rf_off(running, board):
 
 
 def test_capture_after_disconnect(running, board):
-    board.message("CAPT:RATE 40000", 1.0)
+    board.message("CAPT:RATE 20000", 1.0)
     sweep = running.configure(Sweep(ramp_time=8e-3, kind="saw", dwell=2e-3))
     board.inject("disconnect")
     np.testing.assert_array_equal(running.capture(64), board.source.served[-1][2])

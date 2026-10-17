@@ -43,7 +43,7 @@ jobs:
       - name: core tests
         run: docker run --rm qmrdk-firmware:ci make test
       - name: compile
-        run: docker run --rm -v "$PWD/artifacts:/out" qmrdk-firmware:ci sh -c 'make compile && cp build/radar/radar.hex build/radar/isr.lst build/radar/radar.map /out/'
+        run: docker run --rm -v "$PWD/artifacts:/out" qmrdk-firmware:ci sh -c "make compile RADAR_COMMIT=$(echo ${{ github.event.pull_request.head.sha || github.sha }} | cut -c1-12) && cp build/radar/radar.hex build/radar/isr.lst build/radar/radar.map /out/"
       - uses: actions/upload-artifact@v7
         with:
           name: radar-firmware

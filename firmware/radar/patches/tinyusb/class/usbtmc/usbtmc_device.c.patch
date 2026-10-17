@@ -1,0 +1,20 @@
+--- a/usbtmc_device.c
++++ b/usbtmc_device.c
+@@ -668,7 +668,7 @@
+       // wValue is the requested bTag to abort
+       if (usbtmc_state.state != STATE_RCV) {
+         rsp.USBTMC_status = USBTMC_STATUS_FAILED;
+-      } else if (usbtmc_state.lastBulkOutTag == (request->wValue & 0x7Fu)) {
++      } else if (usbtmc_state.lastBulkOutTag == (request->wValue & 0xFFu)) {
+         rsp.USBTMC_status = USBTMC_STATUS_TRANSFER_NOT_IN_PROGRESS;
+       } else {
+         rsp.USBTMC_status = USBTMC_STATUS_SUCCESS;
+@@ -704,7 +704,7 @@
+       TU_VERIFY(request->wIndex == usbtmc_state.ep_bulk_in);
+       // wValue is the requested bTag to abort
+       if ((usbtmc_state.state == STATE_TX_REQUESTED || usbtmc_state.state == STATE_TX_INITIATED) &&
+-          usbtmc_state.lastBulkInTag == (request->wValue & 0x7Fu)) {
++          usbtmc_state.lastBulkInTag == (request->wValue & 0xFFu)) {
+         rsp.USBTMC_status = USBTMC_STATUS_SUCCESS;
+         usbtmc_state.transfer_size_remaining = 0u;
+         // Check if we've queued a short packet

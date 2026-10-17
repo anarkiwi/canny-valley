@@ -75,8 +75,8 @@ DEFAULTS = {
 }
 # CV firmware header: (type, minimum, maximum); read-backs are the realised values
 CV_SETTINGS = {
-    "SWEEP:FREQSTAR": (float, 2.25, 2.5),
-    "SWEEP:FREQSTOP": (float, 2.25, 2.5),
+    "SWEEP:FREQSTAR": (float, 2.3, 2.5),
+    "SWEEP:FREQSTOP": (float, 2.3, 2.5),
     "SWEEP:RAMPTIME": (float, 0.0, 65536.0),
     "SWEEP:TYPE": (int, 0, 4),
     "SWEEP:DWEL": (float, 0.0, np.inf),
@@ -90,7 +90,8 @@ CV_DEFAULTS = DEFAULTS | {
     "CAPT:RATE": 25_000.0,
     "POWE:RF:TIME": 30,
 }
-CV_R = (500, 16383)
+CV_R = (504, 16376)
+CV_R_STEP = 8
 CV_ORIGIN = 14.5e6
 Q24 = 2**24
 EMPTY_BLOCK = b"#6000000"
@@ -147,6 +148,12 @@ def scene_source(
         return codes
 
     return source
+
+
+def rate_div(rate: float) -> int:
+    """Sample period in reference cycles for a requested CV sample rate: the
+    nearest multiple of `CV_R_STEP` (Timer2 counts the reference 1:8)."""
+    return CV_R_STEP * nearest(F_REF / CV_R_STEP / rate)
 
 
 class SimBoard:
@@ -219,7 +226,7 @@ class SimBoard:
 
     def _rate_div(self) -> int:
         """CV sample clock divider R, `fs = F_REF / R`."""
-        return nearest(F_REF / self.state["CAPT:RATE"])
+        return rate_div(self.state["CAPT:RATE"])
 
     def _ramp(self):
         """CV quantisation (§6): `(Nr, N0q, N0q + step K, step, Nd)` with
@@ -302,7 +309,7 @@ class SimBoard:
         if head == "SWEEP:DWEL":
             return nearest(value * 1e-3 * self.fs) >= MIN_SAMPLES
         if head == "CAPT:RATE":
-            return value > 0 and CV_R[0] <= nearest(F_REF / value) <= CV_R[1]
+            return value > 0 and CV_R[0] <= rate_div(value) <= CV_R[1]
         return True
 
     def message(self, msg: str, timeout_s: float) -> str | bytes | None:

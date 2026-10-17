@@ -151,8 +151,8 @@ def test_info_and_limits_cv(capsys, attach):
     code, out, _ = run(capsys, "info")
     info = json.loads(out)
     assert code == 0 and info["timing"] == CV_TIMING and not info["rf"]
-    assert info["limits"]["f_min"] == 2.25e9
+    assert info["limits"]["f_min"] == 2.3e9
     code, _, err = run(capsys, "set", "--f0", "2.2")
-    assert code == 2 and "outside 2.25..2.5 GHz" in err
-    code, out, _ = run(capsys, "set", "--f0", "2.25", "--ramp-time", "0.2")
+    assert code == 2 and "outside 2.3..2.5 GHz" in err
+    code, out, _ = run(capsys, "set", "--f0", "2.3", "--ramp-time", "0.2")
     assert code == 0 and json.loads(out)["sweep"]["ramp_time"] == 0.2e-3

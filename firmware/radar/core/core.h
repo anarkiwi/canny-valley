@@ -25,7 +25,7 @@ enum { OUT_NONE, OUT_TEXT, OUT_BLOCK, OUT_HEX };
 typedef struct {
   double f0, f1, ramp_ms, dwell_ms;
   uint16_t rdiv, refdiv, timeout_s;
-  uint8_t type, gpo;
+  uint8_t type;
   bool rf, running, clock, continuous, locked, clock_ok;
   uint16_t temp;
   uint32_t last_rx;
