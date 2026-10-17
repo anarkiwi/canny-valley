@@ -271,6 +271,8 @@ Verified with antennas, by `tools/rftest.py` and `qmrdk calib timing`:
   alias to DC; a CW's IF spectrum shows the same low-frequency lines with RF
   off as on, at both sample rates;
 * RF auto-mute: RF on, no host traffic for 35 s, `POWE:RF?` = 0;
+* `SYST:TEMP?` steady at idle and after captures (the AD7694 releases SDI1
+  when the sample clock stops);
 * `if_delay` from a single static set at the default 8 ms ramp.
 
 Remaining:
@@ -278,5 +280,8 @@ Remaining:
 1. The 20 MHz on LD_SDO in the transmitted spectrum, on a spectrum analyser
    with TX terminated (the datasheet warns that a toggling GPO can degrade
    spectral performance).
-2. `if_delay` constant across ramp times and sample rates, and step 3's
-   first-ramp direction against the reported one.
+2. Step 3's first-ramp direction against the reported one (needs the
+   sled).
+
+`if_delay` does not depend on the sample rate but does depend on the beat
+frequency ([calibration.md](calibration.md), CV firmware).
