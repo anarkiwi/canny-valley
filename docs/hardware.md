@@ -24,7 +24,7 @@ but unconfirmed.
 | U24 | Mini-Circuits SYM-25DMHW+ | receive mixer (40–2500 MHz, +13 dBm LO class) |
 | U16 | Linear Technology LTC6242 (marking `6242I`), 16-pin SSOP | quad op-amp forming the active IF filter between jumpers J6/J7 and J8/J9 |
 | U10 | Analog Devices AD7694ARMZ (brand `C4K`, A grade, ±6 LSB INL), 16-bit 250 kSPS SAR, 8-lead MSOP | IF digitiser |
-| — | ADT7301-compatible temperature sensor (14-bit, 1/32 °C), not on the component side | board temperature |
+| — | ADT7301-compatible temperature sensor (14-bit, 1/32 °C), not found on the component side | board temperature |
 | A1, A2, A3 | chip attenuators marked `2` | RF pads |
 | U14 | SOIC-8, unread | presumed loop-filter amplifier |
 | U11 | Linear Technology SOT-23-6 (marking `LTAHG`), with inductor L2 | presumed switching supply |
