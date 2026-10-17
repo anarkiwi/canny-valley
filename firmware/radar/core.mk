@@ -29,7 +29,7 @@ $(BUILD)/radar_test/test_core: $(RADAR_TEST_SRC) $(RADAR_CORE_HDR) \
 	$(CXX) $(RADAR_TEST_CXXFLAGS) $(RADAR_DEFS) $(RADAR_INC) -o $@ \
 		$(RADAR_TEST_SRC) $(filter %.o,$^)
 
-$(BUILD)/radar_test/core/cmds.o: RADAR_TEST_CFLAGS += -DRADAR_COMMIT='"0123456789ab"'
+$(BUILD)/radar_test/core/cmds.o: RADAR_TEST_CFLAGS += -DRADAR_COMMIT=0123456789ab-dirty
 
 radar-test: $(BUILD)/radar_test/test_core
 	timeout 120 $(BUILD)/radar_test/test_core

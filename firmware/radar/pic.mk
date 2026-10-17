@@ -28,7 +28,7 @@ $(RADAR_OUT)/commit: FORCE
 	mkdir -p $(dir $@)
 	echo '$(RADAR_COMMIT)' | cmp -s - $@ || echo '$(RADAR_COMMIT)' > $@
 $(RADAR_OUT)/core/cmds.o: $(RADAR_OUT)/commit
-$(RADAR_OUT)/core/cmds.o: PIC_CFLAGS += -DRADAR_COMMIT='"$(RADAR_COMMIT)"'
+$(RADAR_OUT)/core/cmds.o: PIC_CFLAGS += -DRADAR_COMMIT=$(RADAR_COMMIT)
 FORCE:
 
 # -O2 (available in the free edition) inlines the scheduler into the ISR.
