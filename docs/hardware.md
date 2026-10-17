@@ -124,28 +124,29 @@ Power-up sequence: SEN high 1 s, low; then the registers below, in order.
 
 | Reg | Value | Use | Conf |
 |---|---|---|---|
-| 01h | `0x000002` | chip enable via SPI | H value, M meaning |
-| 02h | R | reference divider, default 1 | H |
-| 06h | `0x001D3F` + mode | sigma-delta configuration; bits 7:5 select the operating mode (0 fractional CW, 1 integer CW, 5/6/7 sweeper single ramp / single triangle / continuous triangle) | H value, M meaning |
-| 07h | `0x004865`, then `0x104865` | lock-detect configuration; bit 20 is cleared and set again (50 µs apart) after every change of R; bit 15 enables cycle-slip prevention | H value, M meaning |
-| 08h | `0x016FFF` | analogue enables and bias | H |
-| 09h | `0x803264` (CW: `0x9AF264`) | charge pump: down gain bits 6:0, up gain bits 13:7 (100 each), offset bits 20:14, source/sink offset enables bits 21/22, high-current bit 23 | H layout, M units |
-| 0Bh | `0x01EC71` | fixed | H |
-| 0Fh | `0x000013` | GPO / SDO configuration (lock detect readable over SPI) | H value, L meaning |
-| 0Eh | 0, then 1 | written 0 before and 1 after every reprogramming; a 0 → 1 edge (5 µs) is the software sweep trigger | H sequence, M meaning |
+| 01h | `0x000002` | EnPinSel 0, EnFromSPI 1: chip enabled by SPI, CEN pin ignored | H |
+| 02h | R | reference divider, default 1; f_PD = f_ref / R | H |
+| 06h | `0x001D3F`, bits 7:5 replaced by the mode | modulator type A (bit 0), reserved 4:1 = 15 and 12:10 = 7, autoseed (bit 8), SPI trigger (EXTTRIG_EN bit 9 = 0), DSM clock from the M counter (18:17 = 0). SD_MODE bits 7:5: 0 fractional CW, 1 integer CW, 5 one-way sweep, 6 two-way sweep (both triggered), 7 two-way automatic sweep; the boot value carries 1 | H |
+| 07h | `0x004865`, then `0x104865` | lock detect after 2048 consecutive good PD cycles (2:0 = 5), counters and timer enabled (bits 11, 14), cycle-slip prevention off (bit 15); bit 20 trains the lock-detect timer and is cleared and set again (50 µs apart) after every change of R. Reserved bit 21 is left 0 although the datasheet says program 1 | H |
+| 08h | `0x016FFF` | all analogue blocks enabled (9:0), RF divider biases 3/3, RF buffer bias 1; RF ÷2 off (VCO below 4 GHz), crystal low-gain off (reference below 200 MHz) | H |
+| 09h | `0x803264`; fractional CW `0xBAF264` | charge pump: down and up current 100 × 20 µA = 2 mA (6:0, 13:7), high-gain boost CPHiK on (bit 23). Fractional CW adds offset 107 × 5 µA = 535 µA (20:14) with source offset enabled (bit 21 = PFDInv, as the datasheet recommends for fractional modes); integer CW and the boot value have no offset | H |
+| 0Bh | `0x01EC71` | PFD delay 1, PFDInv 1 (inverting active loop filter), UP and DN enabled, prescaler bias 3, op-amp bias 3, M-counter clock gating 3 | H |
+| 0Fh | `0x000013` | GPOSel 19: ramp clock on LD_SDO between reads, auto-muxed with SDO; the pin is not wired to U4 | H |
+| 0Eh | 0, then 1 | SPI trigger (06h bit 9 = 0): written 0 before and 1 after every reprogramming; the 0 → 1 edge (5 µs) starts a triggered sweep | H |
 
 Frequency words, with `N = f × R / f_ref` (f_ref 20 MHz, f the VCO frequency):
 register 03h = ⌊N⌋, register 04h = frac(N) · 2²⁴.
 
 Sweeper set-up: the ramp is divided into `steps = T × f_ref` reference
-periods (M). Register 0Ah holds the per-step increment `(N_stop − N_start) /
-steps · 2²⁴`, truncated to an integer; registers 0Ch/0Dh hold the integer and
-fractional parts of the end point recomputed from the truncated increment,
+periods. Register 0Ah (MODSTEP) holds the per-step increment `(N_stop −
+N_start) / steps · 2²⁴`, truncated to an integer; registers 0Ch/0Dh (stop
+N_int / N_frac) hold the end point recomputed from the truncated increment,
 and 03h/04h the start (H). The swept bandwidth is therefore at most the
 requested `f_stop − f_start` and falls short of it by up to one increment
 LSB per step, which matters when the increment is small (long ramps, small
-bandwidth). If start > stop the two are exchanged. Start and stop are limited to
-2400–2500 MHz.
+bandwidth). If start > stop the two are exchanged. Start and stop are
+limited to 2400–2500 MHz. The chip adds MODSTEP once per PD cycle, so the
+ramp lasts `T` only for R = 1 and `R × T` otherwise (H datasheet, M board).
 
 Lock state is read from register 12h bit 1; register 03h/04h read back give
 the actual frequency. No lock-detect pin is wired to U4.
@@ -223,8 +224,6 @@ connectors P1 and P2 capped.
 ## Open items for a replacement controller program
 
 * ADC reference voltage and U12's part number (measure VREF on U10 pin 1).
-* HMC703 register semantics are from the register layout and behaviour;
-  check 06h, 07h, 08h, 0Bh and 0Fh against the HMC703 datasheet.
 * The Bluetooth module (§4.7, RB2) is not needed for USB-only control and
   can be left unconfigured.
 * EEPROM slot stride (§4.4), from a dump of U1.
