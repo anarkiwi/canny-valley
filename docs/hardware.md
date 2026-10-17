@@ -28,7 +28,7 @@ but unconfirmed.
 | A1, A2, A3 | chip attenuators marked `2` | RF pads |
 | U14 | SOIC-8, unread | presumed loop-filter amplifier |
 | U11 | Linear Technology SOT-23-6 (marking `LTAHG`), with inductor L2 | presumed switching supply |
-| U12 | Linear Technology MSOP-8 (marking `LTDTF`) beside U10 | presumed AD7694 reference (5 V input span) |
+| U12 | Linear Technology LT3060TS8 (marking `LTDTF`), adjustable low-noise LDO in an 8-lead ThinSOT: 1 REF/BYP, 2 ADJ (0.6 V), 3/4 GND, 5 IN, 6 OUT, 7 SHDN, 8 GND; `V_OUT = 0.6 V × (1 + R_top / R_bottom)` | presumed AD7694 reference or supply; output voltage set by a divider, not yet traced |
 | U8, U9 | SOIC-8, unread | U8 with volume trimmer R18: speaker amplifier, no connection to U4 |
 | U5 | SOT-23-6 (marking `NFTF`) beside J2/J3 | presumed USB/VIN power switching |
 | U7, U18 | SOT-23 (markings `JZ2?C`, `JW1tB`) in the prototyping areas | unread small analogue parts |
@@ -223,7 +223,8 @@ connectors P1 and P2 capped.
 
 ## Open items for a replacement controller program
 
-* ADC reference voltage and U12's part number (measure VREF on U10 pin 1).
+* ADC reference voltage: measure VREF on U10 pin 1 and U12 OUT (pin 6) to
+  confirm U12 drives it.
 * The Bluetooth module (§4.7, RB2) is not needed for USB-only control and
   can be left unconfigured.
 * EEPROM slot stride (§4.4), from a dump of U1.
