@@ -32,7 +32,7 @@ and this document updated before the device layer is written.
 | Vendor ID | `0x2012` | S |
 | Product ID | `0x0013` observed (H); `0x0017` in the vendor script (S). The host library matches any PID under the VID |
 | Product string | `QM4004` | H |
-| Serial string | Decimal serial number, zero-padded to 4 digits | S, H |
+| Serial string | Decimal serial number, zero-padded to 4 digits; V1.1.0 firmware never loads it from the EEPROM, so every board reports `0021` after power-up ([hardware.md](hardware.md) §4.4) | S, H |
 | VISA resource | `USB0::0x2012::<pid>::<serial %04d>::INSTR` | S, H |
 
 The device is a standard USBTMC instrument, so no vendor driver is needed.
@@ -135,6 +135,7 @@ Side effects:
 | `POWE:RF <bool>` | `POWE:RF?` | un-mute / mute the RF output | manual: 0 (off); observed after power-up: 1 with the PLL locked in AUTO sweep (H) |  M, H |
 
 The board transmits from the moment it is powered, before any host command.
+RF on/off switches an active-low RF enable line (hardware.md §4.6).
 Output power is not adjustable (M: up to 1 W class output listed for sweep
 modes, 0.125 W for CW). The host must leave the RF off whenever it is not
 actively capturing: session close, error paths and signal handlers send
@@ -159,8 +160,16 @@ T_max     = (f_stop - f_start) / slope_min   [s]
 The host validates `ramp time <= T_max` before sending `SWEEP:RAMPTIME` and
 offers the smallest `refdiv` that satisfies a requested ramp time.
 
-`FREQ:LOCK?` can read 0 in every sweep type after power-up and recover only
-on a power cycle (H). The host refuses to capture unless it reads 1 after
+`FREQ:LOCK?` reports the synthesiser's lock-detect status, read over its
+serial port; no lock-detect line is wired to the controller
+([hardware.md](hardware.md) §4.1). It can read 0 in every sweep type after
+power-up and recover only on a power cycle (H).
+
+The synthesiser's fractional word is 24 bits and its sweep increment is a
+whole number of fractional LSBs per reference period, truncated, so a ramp
+sweeps up to one LSB per step less than requested; the shortfall matters for
+long ramps over small bandwidths (hardware.md §4.1). The host stores the
+read-back settings, not the realised bandwidth. The host refuses to capture unless it reads 1 after
 `SWEEP:START`.
 
 ### 3.4 Capture
@@ -170,11 +179,13 @@ on a power cycle (H). The host refuses to capture unless it reads 1 after
 | `CAPT:FRAM <n>` | acquire `n` consecutive ADC samples into device memory | 1 – 4096 | M |
 | `CAPT:FRAM?` | return the next chunk of the acquired frame | — | M |
 
-ADC: 16 bit, input span 5 V centred on mid-scale (M, S). **The sample rate
+ADC: 16 bit, input span 5 V centred on mid-scale (M, S); all 16 bits are
+live in recorded frames (H). **The sample rate
 is 21 977 Hz, not the documented 20 kHz** (H): fitted against a simultaneous
 96 kHz audio recording of the IF, and consistent with the sweep period seen
-in frames (702 samples per 32 ms) and with frame acquisition time. The value
-matches 16 MHz / 728. All host processing uses the measured rate; axes
+in frames (702 samples per 32 ms) and with frame acquisition time. It is
+16 MHz / 728: the ADC is clocked from the controller's own 12 MHz oscillator,
+independent of the synthesiser's 20 MHz reference (hardware.md §4.2). All host processing uses the measured rate; axes
 computed by the vendor software with 20 kHz are 9 % short.
 
 `CAPT:FRAM?` response:
@@ -240,7 +251,7 @@ timestamped on the host at step 1.
 | `SYST:MODNUM?` | model number | M |
 | `SYST:FIRM?` | firmware version | M |
 | `SYST:VERS?` | SCPI version `YYYY.V` | M |
-| `SYST:TEMP?` | maximum board temperature, °C | M |
+| `SYST:TEMP?` | board temperature, °C, from the single on-board sensor (1/32 °C resolution, hardware.md §4.3) | M |
 | `SYST:BLUE?` | documented (M) but rejected as an undefined header (-113) with no response on firmware V1.1.0 (H); not used | M, H |
 | `SYST:STAT?` | `<code>, "<text>"` (table below) | M |
 | `SYST:ERR?` | `<code>, "<text>"`; pops the oldest entry of a 10-deep FIFO; `0, "No error"` when empty. First read after power-up returns `-500,"Power on"` (H) | M, H |
@@ -287,7 +298,7 @@ Standard SCPI codes the firmware can return: -101, -102, -103, -105, -108,
 
 Host error policy: every setter is followed by `SYST:ERR?` until the queue
 reads 0; a non-zero code raises a typed exception carrying code and text.
-The light bar on the board flashes while an error is queued (M).
+The light bar on the board (10 segments) flashes while an error is queued (M).
 
 ### 3.8 Command set used by the host
 
@@ -363,5 +374,5 @@ Resolved by the phase 0 probe; each is one observable test.
 | 7 | Resolved (H): `Not Ready` after the last chunk; no re-read | — |
 | 8 | Resolved (H): 3.4 ms | — |
 | 9 | Resolved (H): pyvisa-py detaches the kernel driver | — |
-| 10 | Sample rate measured as 21 977 Hz (H), so a ramp is not an integer number of samples (351.6 for 16 ms). Remaining: stability of the ratio between ADC and sweep clocks | sweep segmentation |
+| 10 | Resolved: sample rate 21 977 Hz (H), so a ramp is not an integer number of samples (351.6 for 16 ms). ADC and sweep run from independent oscillators (hardware.md §1), so their ratio drifts by the difference of the two oscillator errors (tens of ppm, temperature dependent) | sweep segmentation |
 | 11 | Scaling divisor: the vendor script divides by 65535 (S); 2^16 would differ | gain error of 1.5e-5, documentation only |
