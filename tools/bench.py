@@ -120,19 +120,39 @@ def stream(dev: Device, rate: float, seconds: float) -> dict:
     }
 
 
-def timeout_recovery(dev: Device) -> dict:
-    """A block read that times out, then `CAPT:ABOR` and a fresh query."""
+def timeout_recovery(dev: Device, rounds: int = 4) -> list:
+    """Block reads that time out, each followed by `CAPT:ABOR` and a fresh
+    query; the queries between rounds walk the USBTMC bTag through 1-255, so
+    the host's abort runs with tags on both sides of 128."""
     dev.configure(Sweep(2.4e9, 2.5e9, 16e-3))
-    dev.transport.write("CAPT:CONT 1000000")
+    out = []
+    for _ in range(rounds):
+        for _ in range(50):
+            dev.transport.query("*IDN?")
+        dev.transport.write("CAPT:CONT 1000000")
+        try:
+            dev.transport.query_block("CAPT:BLOC?", timeout=1)
+            timed_out = False
+        except DeviceTimeout:
+            timed_out = True
+        dev.transport.write("CAPT:ABOR")
+        dev.transport.flush()
+        out.append(
+            {
+                "timed_out": timed_out,
+                "idn_after": dev.transport.query("*IDN?"),
+                "errors": dev.errors(),
+            }
+        )
+    return out
+
+
+def checked(fn, *args):
+    """Result of one check, or the error that ended it."""
     try:
-        dev.transport.query_block("CAPT:BLOC?", timeout=1)
-        timed_out = False
-    except DeviceTimeout:
-        timed_out = True
-    dev.transport.write("CAPT:ABOR")
-    dev.transport.flush()
-    idn = dev.transport.query("*IDN?")
-    return {"timed_out": timed_out, "idn_after": idn, "errors": dev.errors()}
+        return fn(*args)
+    except (DeviceError, ValueError) as err:
+        return {"error": f"{type(err).__name__}: {err}"}
 
 
 def main() -> None:
@@ -153,20 +173,30 @@ def main() -> None:
             "rf_idle": dev.transport.query("POWE:RF?"),
             "temperature": dev.temperature(),
             "limits": vars(dev.limits),
-            "rejected": rejected(dev),
-            "cw_lock": lock_scan(dev, a.step),
-            "sweeps": sweep_locks(dev),
-            "streams": [stream(dev, r, a.seconds) for r in RATES],
-            "timeout_recovery": timeout_recovery(dev),
         }
-        dev.scpi(f"CAPT:RATE {RATES[0]}")
-        dev.stop()
-        report["rf_final"] = dev.transport.query("POWE:RF?")
-        report["errors_final"] = dev.errors()
-    a.out.mkdir(parents=True, exist_ok=True)
+        checks = {
+            "rejected": (rejected, dev),
+            "cw_lock": (lock_scan, dev, a.step),
+            "sweeps": (sweep_locks, dev),
+            **{f"stream_{r:.0f}": (stream, dev, r, a.seconds) for r in RATES},
+            "timeout_recovery": (timeout_recovery, dev),
+        }
+        try:
+            for name, (fn, *args) in checks.items():
+                report[name] = checked(fn, *args)
+            dev.scpi(f"CAPT:RATE {RATES[0]}")
+            dev.stop()
+            report["rf_final"] = dev.transport.query("POWE:RF?")
+            report["errors_final"] = dev.errors()
+        finally:
+            write_report(report, a.out)
+
+
+def write_report(report: dict, out: pathlib.Path) -> None:
+    """JSON report named by firmware and time; also printed."""
+    out.mkdir(parents=True, exist_ok=True)
     path = (
-        a.out
-        / f"bench-{report['idn']['firmware']}-{time.strftime('%Y%m%dT%H%M%S')}.json"
+        out / f"bench-{report['idn']['firmware']}-{time.strftime('%Y%m%dT%H%M%S')}.json"
     )
     path.write_text(json.dumps(report, indent=2, default=str))
     print(json.dumps(report, indent=2, default=str))

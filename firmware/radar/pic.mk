@@ -58,6 +58,18 @@ $(RADAR_OUT)/tusb/%.o: $(TUSB_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(XC16)/xc16-gcc $(PIC_CFLAGS) -DNDEBUG -w -c -o $@ $<
 
+# TinyUSB fixes (patches/tinyusb/<path>.patch) are compiled from patched
+# copies, so the submodule stays pristine.
+TUSB_PATCHES = $(patsubst $(RADAR_DIR)/patches/tinyusb/%.patch,%, \
+	$(shell find $(RADAR_DIR)/patches/tinyusb -name '*.patch'))
+$(RADAR_OUT)/tusb-src/%: $(TUSB_DIR)/% $(RADAR_DIR)/patches/tinyusb/%.patch
+	@mkdir -p $(dir $@)
+	patch -s -o $@ $< $(word 2,$^)
+$(foreach f,$(TUSB_PATCHES),$(eval \
+$(RADAR_OUT)/tusb/$(f:.c=.o): $(RADAR_OUT)/tusb-src/$(f) ; \
+	@mkdir -p $$(dir $$@) && $(XC16)/xc16-gcc $$(PIC_CFLAGS) -DNDEBUG -w \
+	-I$(TUSB_DIR)/$(dir $(f)) -c -o $$@ $$<))
+
 $(RADAR_OUT)/radar.elf: $(RADAR_OBJ)
 	$(XC16)/xc16-gcc $(PIC_LDFLAGS) -o $@ $^
 
