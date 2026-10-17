@@ -204,7 +204,13 @@ void hal_clock_stop(void) {
     spi2_tail = 0;
   }
   spi1_config(SPI1_HK);
+  /* The last sample instant started a conversion; with CNV low the AD7694
+     drives its result on SDI1 until 16 SCK edges have read it, so read it
+     out before the temperature sensor or EEPROM share the line. */
+  hal_delay_us(4);
   CNV = 0;
+  (void)spi1_byte(0);
+  (void)spi1_byte(0);
 }
 
 uint32_t hal_edges(uint16_t ms, uint8_t ps) {

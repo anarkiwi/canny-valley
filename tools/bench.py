@@ -147,6 +147,27 @@ def timeout_recovery(dev: Device, rounds: int = 4) -> list:
     return out
 
 
+def temperature(dev: Device, reads: int = 200) -> dict:
+    """`SYST:TEMP?` at idle and after each of `reads` short captures: the
+    readings' spread exposes a corrupted sensor read on the shared SPI1."""
+    dev.configure(Sweep(2.4e9, 2.4e9, 16e-3, kind="cw"))
+    out = {}
+    for name, before in (("idle", None), ("after_capture", 256)):
+        t = np.empty(reads)
+        for i in tqdm(range(reads), desc=f"temperature {name}", unit="read"):
+            if before:
+                dev.capture(before)
+            t[i] = dev.temperature()
+        med = float(np.median(t))
+        out[name] = {
+            "median": med,
+            "min": float(t.min()),
+            "max": float(t.max()),
+            "outliers": int(np.sum(np.abs(t - med) > 1.0)),
+        }
+    return out
+
+
 def checked(fn, *args):
     """Result of one check, or the error that ended it."""
     try:
@@ -180,6 +201,7 @@ def main() -> None:
             "sweeps": (sweep_locks, dev),
             **{f"stream_{r:.0f}": (stream, dev, r, a.seconds) for r in RATES},
             "timeout_recovery": (timeout_recovery, dev),
+            "temperature": (temperature, dev),
         }
         try:
             for name, (fn, *args) in checks.items():
