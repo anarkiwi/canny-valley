@@ -277,7 +277,7 @@ TEST_CASE("frequency words, sweep plan and register values") {
   synth_plan_t p;
   CHECK(synth_nq(2.4) == 120 * 16777216L);
   CHECK(synth_hz(synth_nq(2.4)) == 2400000000u);
-  CHECK(synth_hz(SYNTH_NQ_MIN) == 2250000000u);
+  CHECK(synth_hz(SYNTH_NQ_MIN) == 2300000000u);
   CHECK(synth_hz(SYNTH_NQ_MAX) == 2500000000u);
   CHECK(synth_div_round(7, 2) == 4);
   CHECK(synth_div_round(-7, 2) == -4);
@@ -301,11 +301,11 @@ TEST_CASE("frequency words, sweep plan and register values") {
   CHECK_FALSE(synth_plan(&p, 2.4, 2.5, 0.1, 1.0, 800));
   CHECK_FALSE(synth_plan(&p, 2.4, 2.5, 0.0, 1.0, 800));
   CHECK(synth_plan(&p, 2.4, 2.5, 0.16, 1.0, 800));
-  CHECK_FALSE(synth_plan(&p, 2.25, 2.5, 0.16, 1.0, 16383));
+  CHECK_FALSE(synth_plan(&p, 2.3, 2.5, 0.16, 1.0, 16383));
   CHECK(synth_samples(-1.0, 800) == 0);
 
   CHECK(synth_cp_offset(synth_nq(2.375)) == 33);
-  CHECK(synth_cp_offset(synth_nq(2.25)) == 34);
+  CHECK(synth_cp_offset(synth_nq(2.3)) == 34);
   CHECK(synth_cp_offset(synth_nq(2.5)) == 33);
   CHECK(synth_reg09(synth_nq(2.45)) == (0x803264u | 33u << 14 | 1u << 21));
   CHECK(synth_reg06(SD_TWOWAY) == (0x001D1Fu | 6u << 5));
@@ -382,7 +382,7 @@ TEST_CASE_FIXTURE(Fixture, "power-up settings and limits") {
   CHECK(q("CAPT:RATE?") == "25000.000000");
   CHECK(q("SWEEP:ORIG?") == "0.018125,1");
   CHECK(q("SWEEP:LIM?") ==
-        "2.250000000,2.500000000,23841857.910156,0.040000,0.160000");
+        "2.300000000,2.500000000,23841857.910156,0.040000,0.160000");
   CHECK(err() == "0,\"No error\"");
 }
 
@@ -635,7 +635,7 @@ TEST_CASE_FIXTURE(Fixture, "sample rate selection") {
   CHECK(q("CAPT:RATE?") == "39682.539683");
   CHECK(q("SWEEP:ORIG?") == "0.028770,1");
   CHECK(q("SWEEP:LIM?") ==
-        "2.250000000,2.500000000,23841857.910156,0.025200,0.100800");
+        "2.300000000,2.500000000,23841857.910156,0.025200,0.100800");
   CHECK(q("SWEEP:RAMPTIME?") == "16.002000");
   send("CAPT:RATE 1222\n");
   CHECK(q("CAPT:RATE?") == "1221.896383");

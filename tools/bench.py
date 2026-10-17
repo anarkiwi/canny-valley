@@ -20,10 +20,10 @@ from qmrdk.transport import DeviceError, DeviceTimeout
 RATES = (25_000.0, 40_000.0)
 REJECT = ("SWEEP:FREQSTAR 2.2", "SWEEP:FREQSTOP 2.6", "SWEEP:RAMPTIME 0")
 SWEEPS = (
-    Sweep(2.25e9, 2.5e9, 16e-3),
+    Sweep(2.3e9, 2.5e9, 16e-3),
     Sweep(2.4e9, 2.5e9, 1e-3),
     Sweep(2.4e9, 2.5e9, 40e-3),
-    Sweep(2.25e9, 2.5e9, 16e-3, kind="saw", dwell=1e-3),
+    Sweep(2.3e9, 2.5e9, 16e-3, kind="saw", dwell=1e-3),
 )
 
 

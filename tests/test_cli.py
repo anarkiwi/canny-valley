@@ -263,10 +263,10 @@ def test_calib_commands(monkeypatch):
 def test_sweep_options(tmp_path, scene_path):
     rec_path = str(tmp_path / "wide.npz")
     argv = ["sar", "scan", "--sim", "--scene", scene_path, "--out", rec_path,
-            "--f0", "2.25", "--f1", "2.5", "--ramp-time", "20"]  # fmt: skip
+            "--f0", "2.3", "--f1", "2.5", "--ramp-time", "20"]  # fmt: skip
     assert cli.main(argv + SMALL) == 0
     sweep = Recording.load(rec_path).sweep
-    assert (sweep.f0, sweep.f1, sweep.ramp_time) == pytest.approx((2.25e9, 2.5e9, 0.02))
+    assert (sweep.f0, sweep.f1, sweep.ramp_time) == pytest.approx((2.3e9, 2.5e9, 0.02))
 
 
 @pytest.mark.timeout(120)

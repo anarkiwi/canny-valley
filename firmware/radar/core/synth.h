@@ -23,7 +23,7 @@ extern "C" {
    SCK2 edge of the trigger frame in the sample ISR. */
 #define SYNTH_DELAY_TCY 18u
 #define SYNTH_GAP_MIN 4u
-#define SYNTH_NQ_MIN 1887436800L
+#define SYNTH_NQ_MIN 1929379840L
 #define SYNTH_NQ_MAX 2097152000L
 #define SYNTH_STEP_MAX 0x7FFFFFL
 #define SYNTH_RAMP_MS_MAX 65536.0

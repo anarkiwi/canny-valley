@@ -353,7 +353,7 @@ def _hw_options(p, sweep=False):
     p.add_argument("--resource", help="VISA resource name")
     p.add_argument("--serial", help="board serial number")
     if sweep:
-        span = "2.4-2.5 GHz (stock) or the board's limits (CV firmware: 2.25-2.5 GHz)"
+        span = "2.4-2.5 GHz (stock) or the board's limits (CV firmware: 2.3-2.5 GHz)"
         p.add_argument("--f0", type=float, default=2.4, help=f"sweep start, {span}")
         p.add_argument("--f1", type=float, default=2.5, help=f"sweep stop, {span}")
         p.add_argument(

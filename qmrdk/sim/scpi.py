@@ -75,8 +75,8 @@ DEFAULTS = {
 }
 # CV firmware header: (type, minimum, maximum); read-backs are the realised values
 CV_SETTINGS = {
-    "SWEEP:FREQSTAR": (float, 2.25, 2.5),
-    "SWEEP:FREQSTOP": (float, 2.25, 2.5),
+    "SWEEP:FREQSTAR": (float, 2.3, 2.5),
+    "SWEEP:FREQSTOP": (float, 2.3, 2.5),
     "SWEEP:RAMPTIME": (float, 0.0, 65536.0),
     "SWEEP:TYPE": (int, 0, 4),
     "SWEEP:DWEL": (float, 0.0, np.inf),

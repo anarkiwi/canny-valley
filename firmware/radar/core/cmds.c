@@ -4,7 +4,7 @@
 #include "fmt.h"
 #include "hal.h"
 
-#define F_MIN 2.25
+#define F_MIN 2.30
 #define F_MAX 2.5
 #define NS_PER_PD 50
 #define MODEL "QM4004"
