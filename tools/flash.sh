@@ -9,6 +9,7 @@ set -eu
 root=$(git rev-parse --show-toplevel)
 images=${IMAGES:-$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/untracked/mplab}
 if [ $# -eq 0 ]; then
+  git -C "$root" submodule update --init --quiet firmware/radar/lib
   commit=$(git describe --always --dirty --abbrev=12 --exclude '*')
   hex=radar-$commit.hex
   timeout 1800 docker build -q -f "$root/docker/firmware.Dockerfile" \
