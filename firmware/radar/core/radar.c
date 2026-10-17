@@ -213,7 +213,7 @@ static void self_test(void) {
   size_t i;
   for (i = 0; i < sizeof gpo_select && !core.gpo; i++) {
     hal_synth_write(0x0F, gpo_select[i] | REG0F_EXPORT);
-    got = hal_edges(CORE_SELFTEST_MS);
+    got = hal_edges(CORE_SELFTEST_MS, 0);
     if ((got > expect ? got - expect : expect - got) <= expect / 50u + 2u)
       core.gpo = gpo_select[i];
   }

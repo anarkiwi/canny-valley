@@ -223,10 +223,10 @@ void hal_clock_stop(void) {
   B->spi2 = 0;
   B->clock = false;
 }
-uint32_t hal_edges(uint16_t ms) {
+uint32_t hal_edges(uint16_t ms, uint8_t ps) {
   REQUIRE(!B->clock);
   uint32_t sel = B->regs[0x0F] & 0x1F;
-  return sel == B->good_gpo ? ms * B->per_ms() : ms * 20000u;
+  return (sel == B->good_gpo ? ms * B->per_ms() : ms * 20000u) >> 3 * ps;
 }
 bool hal_gpo_level(void) {
   REQUIRE(!B->clock);
@@ -685,8 +685,10 @@ TEST_CASE_FIXTURE(Fixture, "bring-up diagnostics while the clock is stopped") {
   CHECK(q("SYST:EDGE? 20") == std::to_string(20u * 20000u));
   board.regs[0x0F] = 9;
   CHECK(q("SYST:EDGE? 20") == "500");
-  for (const char *cmd : {"SYST:REG 64,0", "SYST:REG 1,16777216",
-                          "SYST:REG? 64", "SYST:EDGE? 0", "SYST:EDGE? 1001"}) {
+  CHECK(q("SYST:EDGE? 20,1") == "62");
+  for (const char *cmd :
+       {"SYST:REG 64,0", "SYST:REG 1,16777216", "SYST:REG? 64", "SYST:EDGE? 0",
+        "SYST:EDGE? 1001", "SYST:EDGE? 20,4"}) {
     send(std::string(cmd) + "\n");
     CHECK_MESSAGE(err() == "201,\"Out of range\"", cmd);
   }

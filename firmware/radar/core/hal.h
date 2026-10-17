@@ -27,8 +27,9 @@ void hal_synth_load(uint8_t reg, uint32_t data);
    Start clears any stale edge; stop leaves SEN low and SPI2 idle. */
 void hal_clock_start(void);
 void hal_clock_stop(void);
-/* Rising edges counted on RP14 (Timer2 external clock) over `ms`. */
-uint32_t hal_edges(uint16_t ms);
+/* Rising edges counted on RP14 (Timer2 external clock) over `ms`, through
+   the Timer2 prescaler 1:1, 1:8, 1:64 or 1:256 (`ps` 0-3): the raw count. */
+uint32_t hal_edges(uint16_t ms, uint8_t ps);
 /* Level of RP14 (HMC703 LD_SDO). */
 bool hal_gpo_level(void);
 

@@ -14,7 +14,8 @@ if [ $# -eq 0 ]; then
   timeout 1800 docker build -q -f "$root/docker/firmware.Dockerfile" \
     -t qmrdk-firmware "$root" >/dev/null
   timeout 900 docker run --rm -v "$images:/out" qmrdk-firmware sh -c \
-    "make compile RADAR_COMMIT=$commit >/dev/null && cp build/radar/radar.hex /out/$hex"
+    "make compile RADAR_COMMIT=$commit >build.log 2>&1 || { tail -40 build.log; exit 1; }
+     cp build/radar/radar.hex /out/$hex"
 else
   hex=$1
 fi

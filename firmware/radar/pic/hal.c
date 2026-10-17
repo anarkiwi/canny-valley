@@ -203,10 +203,11 @@ void hal_clock_stop(void) {
   CNV = 0;
 }
 
-uint32_t hal_edges(uint16_t ms) {
+uint32_t hal_edges(uint16_t ms, uint8_t ps) {
   uint32_t t0;
   uint32_t n;
-  T2CON = _T2CON_T32_MASK | _T2CON_TCS_MASK;
+  T2CON = _T2CON_T32_MASK | _T2CON_TCS_MASK |
+          (uint16_t)(ps & 3u) << _T2CON_TCKPS_POSITION;
   PR3 = 0xFFFF;
   PR2 = 0xFFFF;
   TMR3HLD = 0;

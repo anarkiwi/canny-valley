@@ -227,10 +227,12 @@ static scpi_result_t pin_q(scpi_t *c) {
 }
 
 static scpi_result_t edge_q(scpi_t *c) {
-  uint32_t ms;
+  uint32_t ms, ps = 0;
   if (!clock_idle(c) || uint_param(c, 1, 1000, &ms) != SCPI_RES_OK)
     return SCPI_RES_ERR;
-  SCPI_ResultUInt32(c, hal_edges((uint16_t)ms));
+  if (SCPI_ParamUInt32(c, &ps, FALSE) && ps > 3)
+    return range_error(c);
+  SCPI_ResultUInt32(c, hal_edges((uint16_t)ms, (uint8_t)ps));
   return SCPI_RES_OK;
 }
 
