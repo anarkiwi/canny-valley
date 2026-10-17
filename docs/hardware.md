@@ -151,6 +151,18 @@ ramp lasts `T` only for R = 1 and `R × T` otherwise (H datasheet, M board).
 Lock state is read from register 12h bit 1; register 03h/04h read back give
 the actual frequency. No lock-detect pin is wired to U4.
 
+LD_SDO reaches U4 RB14 (SDI2). With 0Fh = select | GPOAlways | GPOOn and the
+pin counted by Timer2 (CV firmware `SYST:EDGE?`): select 8 (`xtal`) and
+select 9 (`rdiv_pfd`, with 06h[21] = 1) carry the 20 MHz reference; select 7
+(`rdiv core`) stays idle at any R with or without the bypass; select 9
+without the bypass carries f_ref / R; selects 12–14 and 19 (ramp signals)
+stayed idle in a raw-register two-way sweep; the others are static. The
+divided reference therefore cannot be exported while f_PD = 20 MHz. (H)
+
+The PLL locks in CW from 2.295 GHz up to 2.5 GHz and not at 2.294 GHz or
+below (1 MHz steps, board at 34 °C), although the HMC385LP4 is specified
+from 2.25 GHz. (H)
+
 ### 4.2 IF ADC on SPI1
 
 | Item | Value | Conf |
@@ -158,7 +170,7 @@ the actual frequency. No lock-detect pin is wired to U4.
 | Part | AD7694: pseudo-differential input, IN+ 0 V to VREF relative to IN− (ground sense), straight binary output; VREF up to VDD. Codes are ratiometric to VREF and nothing in the firmware or host software depends on its value; the 5 V span used for volts (`A_FS`) is the vendor scripts' nominal scale | H part, M scale |
 | Conversion | rising edge of CNV (RD7) starts a conversion and tri-states SDO; falling edge of CNV puts the MSB on SDO; the other 15 bits follow on SCK falling edges (16 SCK1 clocks, no leading zeros) | H |
 | CNV high time | 2 µs on this board, below the AD7694's maximum tCONV of 3.2 µs (VDD 4.75–5.25 V; 4.66 µs below 4.75 V). A replacement program should hold CNV high for at least tCONV | H |
-| Word | 16 bits, unsigned, mid-scale at zero IF (IF biased to VREF/2); all 16 bits are live in recorded frames | H |
+| Word | 16 bits, unsigned, mid-scale at zero IF (IF biased to VREF/2) with RF on; all 16 bits are live in recorded frames. With RF off (RB5 high) the input sits near 0 V: codes 0 to about 1000 with the CV firmware's read and with the stock read timing | H |
 | Sample period | instruction-timed from U4's 16 MHz clock: 2 µs convert, 16-bit read, 36 µs wait and loop overhead; measured 21 977 Hz = 16 MHz / 728 (45.5 µs) | H measured, M cycle count |
 | Frame | up to 4096 words held in U4 RAM | H |
 
@@ -195,7 +207,8 @@ behind a flag that is set to the immediate 1 just before it is tested
 (`MOV.B #1` at 0x32EE), so it never runs. Consequences (H):
 
 * The USB serial string and `*IDN?` serial are the firmware default `0021`,
-  whatever the EEPROM holds.
+  whatever the EEPROM holds. This board's EEPROM holds 0032 (read by the CV
+  firmware).
 * Saved states live in a RAM table (0x2C46 + 0x16·n) that starts empty at
   power-up; `LOADSTATE` and the power-up state read that table, never the
   EEPROM, so nothing saved survives a power cycle.
