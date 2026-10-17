@@ -230,6 +230,10 @@ uint32_t hal_edges(uint16_t ms, uint8_t ps) {
   uint32_t sel = B->regs[0x0F] & 0x1F;
   return sel == B->good_gpo ? (ms * 20000u) >> 3 * ps : 0;
 }
+uint16_t hal_adc_slow(void) {
+  REQUIRE(!B->clock);
+  return Board::code(B->sample);
+}
 bool hal_gpo_level(void) {
   REQUIRE(!B->clock);
   return B->gpo_level;
@@ -684,6 +688,7 @@ TEST_CASE_FIXTURE(Fixture, "bring-up diagnostics while the clock is stopped") {
   CHECK(q("SYST:REG? 5") == std::to_string(0x654321));
   board.gpo_level = true;
   CHECK(q("SYST:PIN?") == "1");
+  CHECK(q("SYST:ADC?") == std::to_string(Board::code(board.sample)));
   CHECK(q("SYST:EDGE? 20") == "0");
   board.regs[0x0F] = 8;
   CHECK(q("SYST:EDGE? 20") == "400000");
@@ -696,8 +701,8 @@ TEST_CASE_FIXTURE(Fixture, "bring-up diagnostics while the clock is stopped") {
   }
   send("SWEEP:START\n");
   REQUIRE(board.clock);
-  for (const char *cmd :
-       {"SYST:REG 15,1", "SYST:REG? 18", "SYST:PIN?", "SYST:EDGE? 20"}) {
+  for (const char *cmd : {"SYST:REG 15,1", "SYST:REG? 18", "SYST:PIN?",
+                          "SYST:EDGE? 20", "SYST:ADC?"}) {
     send(std::string(cmd) + "\n");
     CHECK_MESSAGE(err() == "-221,\"Settings conflict\"", cmd);
   }

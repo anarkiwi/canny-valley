@@ -33,6 +33,9 @@ void hal_clock_stop(void);
 uint32_t hal_edges(uint16_t ms, uint8_t ps);
 /* Level of RP14 (HMC703 LD_SDO). */
 bool hal_gpo_level(void);
+/* One ADC conversion read as the stock firmware does (CNV high 2 us, two
+   bytes at 4 MHz); sample clock stopped only. */
+uint16_t hal_adc_slow(void);
 
 /* SPI1 housekeeping (sample clock stopped only). */
 uint16_t hal_temp_raw(void);

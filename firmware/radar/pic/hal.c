@@ -230,6 +230,16 @@ uint32_t hal_edges(uint16_t ms, uint8_t ps) {
 
 bool hal_gpo_level(void) { return PORTBbits.RB14; }
 
+uint16_t hal_adc_slow(void) {
+  uint16_t v;
+  CNV = 1;
+  hal_delay_us(2);
+  CNV = 0;
+  v = (uint16_t)spi1_byte(0) << 8;
+  v |= spi1_byte(0);
+  return v;
+}
+
 uint16_t hal_temp_raw(void) {
   uint16_t v;
   TEMP_CS = 0;

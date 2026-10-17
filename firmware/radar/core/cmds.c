@@ -226,6 +226,13 @@ static scpi_result_t pin_q(scpi_t *c) {
   return SCPI_RES_OK;
 }
 
+static scpi_result_t adc_q(scpi_t *c) {
+  if (!clock_idle(c))
+    return SCPI_RES_ERR;
+  SCPI_ResultUInt32(c, hal_adc_slow());
+  return SCPI_RES_OK;
+}
+
 static scpi_result_t edge_q(scpi_t *c) {
   uint32_t ms, ps = 0;
   if (!clock_idle(c) || uint_param(c, 1, 1000, &ms) != SCPI_RES_OK)
@@ -361,6 +368,7 @@ static const scpi_command_t commands[] = {
     {"SYSTem:REGister?", reg_q},
     {"SYSTem:PIN?", pin_q},
     {"SYSTem:EDGE?", edge_q},
+    {"SYSTem:ADC?", adc_q},
     SCPI_CMD_LIST_END,
 };
 
