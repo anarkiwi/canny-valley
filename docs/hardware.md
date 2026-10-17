@@ -17,7 +17,7 @@ but unconfirmed.
 | XJ1 (2×4) | header, unpopulated | odd pins GND; even pins carry U4 RB6–RB9 (§2) |
 | XJ2 (2×3), XJ3 (2×4) | headers, unpopulated | unknown |
 | U2 | Maxim MAX6966 (marking `MAX6966 AEE`), 10-port constant-current LED driver | light bar, one segment per port P0–P9 |
-| U6 | shielded module, Bluegiga iWRAP command set (WT11/WT12 class) | Bluetooth serial link |
+| U6 | Bluegiga WT12-A module (iWRAP command set) | Bluetooth serial link |
 | U13 | oscillator module | synthesiser reference (20 MHz per the manual) |
 | U15 | Hittite HMC703LP4E (marking `H703`) | fractional-N synthesiser with built-in sweeper |
 | U17 | Hittite HMC385LP4 (marking `H385`) | 2.25–2.5 GHz VCO |
