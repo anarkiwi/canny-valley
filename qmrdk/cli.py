@@ -3,11 +3,13 @@
 import argparse
 import dataclasses
 import json
+import os
 import pathlib
 import sys
 
 import numpy as np
 
+from qmrdk import basemap
 from qmrdk.config import Calibration, ScanGeometry, Sweep
 from qmrdk.constants import ADC_MAX, FS_NOMINAL, SCAN_LENGTH
 from qmrdk.device import CV_TYPES, Device, DeviceError
@@ -109,38 +111,56 @@ def _change(rec, path):
     return codes_to_volts(rec.codes) - codes_to_volts(ref.codes)
 
 
-def _image(args):
-    rec = Recording.load(args.recording)
-    if rec.x_pos is None:
-        print(f"{args.recording}: not a SAR scan (no x_pos)", file=sys.stderr)
-        return 1
-    _clipping(rec.codes, args.recording)
-    cal = recorded_calibration(rec, args.cal)
-    geometry = rec.geometry or ScanGeometry()
-    scene = None if args.scene is None else _scene(args.scene)
-    extent = _extent(args, scene, rec)
+def _form(args, rec, cal, extent):
+    """SAR image of `rec` on `extent`, or None (message printed) when the
+    extent is empty or the --reference scan is not comparable."""
     if extent[3] <= extent[2]:
         print(f"empty extent {extent}: check --min-range", file=sys.stderr)
-        return 1
+        return None
     data = rec.codes
-    if args.reference is not None:
+    if getattr(args, "reference", None) is not None:
         try:
             data = _change(rec, args.reference)
         except ValueError as e:
             print(f"not comparable: {e}", file=sys.stderr)
-            return 1
+            return None
     gx, gy = grid(extent, args.pixel)
-    img = form_image(
+    return form_image(
         data,
         rec.x_pos,
         rec.sweep,
         cal,
-        geometry,
+        rec.geometry or ScanGeometry(),
         gx,
         gy,
-        background=_background(args, "none" if args.reference else "mean"),
+        background=_background(
+            args, "none" if getattr(args, "reference", None) else "mean"
+        ),
         aperture_window=args.aperture_window,
     )
+
+
+def _scan_recording(path):
+    """SAR scan recording at `path`, or None (message printed)."""
+    rec = Recording.load(path)
+    if rec.x_pos is None:
+        print(f"{path}: not a SAR scan (no x_pos)", file=sys.stderr)
+        return None
+    _clipping(rec.codes, path)
+    return rec
+
+
+def _image(args):
+    rec = _scan_recording(args.recording)
+    if rec is None:
+        return 1
+    cal = recorded_calibration(rec, args.cal)
+    geometry = rec.geometry or ScanGeometry()
+    scene = None if args.scene is None else _scene(args.scene)
+    extent = _extent(args, scene, rec)
+    img = _form(args, rec, cal, extent)
+    if img is None:
+        return 1
     geom = None if scene is None else compile_scene(scene, rec.sweep.lam)
     save_image(
         args.out,
@@ -166,6 +186,51 @@ def recorded_calibration(rec, path=None):
     cal = Calibration() if path is None else Calibration.load(path)
     timing = rec.extra.get("timing")
     return cal if timing is None else cal.with_timing(**timing)
+
+
+def _overlay(args):
+    key = args.key or os.environ.get("LINZ_API_KEY")
+    if not key:
+        print("no LINZ Data Service key: --key or $LINZ_API_KEY", file=sys.stderr)
+        return 1
+    rec = _scan_recording(args.recording)
+    if rec is None:
+        return 1
+    cal = recorded_calibration(rec, args.cal)
+    if args.r_cal is not None:
+        cal = dataclasses.replace(cal, r_cal=args.r_cal)
+    xc = 0.5 * (rec.x_pos.min() + rec.x_pos.max())
+    r = args.radius
+    img = _form(args, rec, cal, (xc - r, xc + r, args.min_range, r))
+    if img is None:
+        return 1
+    layers = basemap.parse_layers(basemap.capabilities(key, args.cache))
+    layer, zoom, photo, extent = basemap.find_photo(
+        layers, args.lat, args.lon, r, args.zoom, args.cache
+    )
+    rcal = f"r_cal = {cal.r_cal:+.2f} m" if cal.r_cal else "uncalibrated range"
+    bearing, how = args.bearing, ""
+    if args.snap is not None:
+        axis, coherence = basemap.dominant_axis(photo, extent, args.snap)
+        bearing = basemap.snap(args.bearing, axis)
+        how = f" (snapped from {args.bearing:g}°, coherence {coherence:.2f})"
+    basemap.save_overlay(
+        args.out,
+        photo,
+        extent,
+        img,
+        xc,
+        bearing,
+        rail=(rec.x_pos.min(), rec.x_pos.max()),
+        view=(-r, r, -r, r),
+        dynamic_range=args.dynamic_range,
+        alpha=args.alpha,
+        flip=args.flip,
+        attribution=basemap.ATTRIBUTION.format(title=layer.title),
+        title=f"bearing {bearing:.1f}°{how}, {rcal}",
+    )
+    print(f"{args.out}: {layer.title} zoom {zoom} bearing {bearing:.1f}{how}")
+    return 0
 
 
 def _background(args, default="none"):
@@ -492,6 +557,33 @@ def parser():
     )
     _imaging_options(p, None, "hann")
     p.set_defaults(func=_image)
+    p = sar.add_parser("overlay", help="SAR image on a LINZ aerial photo")
+    p.add_argument("recording")
+    p.add_argument("--out", required=True, help="PNG")
+    p.add_argument("--cal", help="calibration JSON")
+    p.add_argument("--lat", type=float, required=True, help="rail centre, degrees")
+    p.add_argument("--lon", type=float, required=True, help="rail centre, degrees")
+    p.add_argument(
+        "--bearing", type=float, required=True, help="boresight, degrees true"
+    )
+    p.add_argument(
+        "--flip", action="store_true", help="+x (away from home) left of boresight"
+    )
+    p.add_argument(
+        "--snap",
+        type=float,
+        metavar="RADIUS",
+        help="snap --bearing to the nearest wall axis of buildings within RADIUS m",
+    )
+    p.add_argument("--r-cal", type=float, help="override the calibration r_cal, m")
+    p.add_argument("--radius", type=float, default=25.0, help="map half-width, m")
+    p.add_argument("--min-range", type=float, default=2.0, help="nearest imaged y, m")
+    p.add_argument("--alpha", type=float, default=0.8, help="SAR opacity at peak")
+    p.add_argument("--zoom", type=int, help="tile zoom (default from layer GSD)")
+    p.add_argument("--key", help="LINZ Data Service API key (default $LINZ_API_KEY)")
+    p.add_argument("--cache", default="artifacts/basemap", help="tile cache dir")
+    _imaging_options(p, None, "hann")
+    p.set_defaults(func=_overlay)
     p = sar.add_parser("demo", help="simulated scan, calibration and animation")
     p.add_argument("--scene", default="yard", help="built-in scene name or JSON")
     p.add_argument("--out", default="artifacts/yard.png", help="animated PNG")
