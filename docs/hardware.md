@@ -222,6 +222,8 @@ connectors P1 and P2 capped.
 * Temperature sensor location and part.
 * HMC703 register semantics are from the register layout and behaviour;
   check 06h, 07h, 08h, 0Bh and 0Fh against the HMC703 datasheet.
-* RE3 source and RB2 function.
+* RE3 source.
+* The Bluetooth module (§4.7, RB2) is not needed for USB-only control and
+  can be left unconfigured.
 * EEPROM slot stride (§4.4), from a dump of U1.
 * XJ1 even-pin order, XJ2 and XJ3 with a meter.
