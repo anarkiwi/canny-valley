@@ -1,5 +1,6 @@
 """SAR scan sequencer: move, settle, capture, record position."""
 
+import dataclasses
 import time
 
 import numpy as np
@@ -30,11 +31,16 @@ def run_scan(
     extra: dict | None = None,
     desc: str = "scan",
 ) -> Recording:
-    """One capture per rail position; records the sled's reported position."""
+    """One capture per rail position; records the sled's reported position
+    and, in `extra`, the radar's device timing (CV firmware) if it has one."""
     positions = np.asarray(positions, dtype=np.float64)
     codes = np.empty((positions.size, n), dtype=np.uint16)
     t_host = np.empty(positions.size)
     x_pos = np.empty(positions.size)
+    extra = dict(extra or {})
+    timing = getattr(radar, "timing", None)
+    if timing is not None:
+        extra |= {"fs": timing.fs, "timing": dataclasses.asdict(timing)}
     sled.home()
     for i, x in enumerate(tqdm(positions, desc=desc, unit="pos")):
         sled.move_to(float(x))
@@ -47,5 +53,5 @@ def run_scan(
         t_host=t_host,
         x_pos=x_pos,
         geometry=geometry or ScanGeometry(),
-        extra=dict(extra or {}),
+        extra=extra,
     )

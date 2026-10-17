@@ -267,3 +267,31 @@ def test_sweep_options(tmp_path, scene_path):
     assert cli.main(argv + SMALL) == 0
     sweep = Recording.load(rec_path).sweep
     assert (sweep.f0, sweep.f1, sweep.ramp_time) == pytest.approx((2.25e9, 2.5e9, 0.02))
+
+
+@pytest.mark.timeout(120)
+def test_scan_manual_cv_records_timing(tmp_path, monkeypatch, attach, cal_path):
+    timing = {"fs": 25_000.0, "n0": 0.018125, "first_up": True}
+    attach(SimBoard(firmware="CV1.0.0"))
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n" * 5))
+    path = str(tmp_path / "manual.npz")
+    argv = ["sar", "scan", "--manual", "--out", path, "--length", "0.1"]
+    assert cli.main(argv + ["--dx", "0.025", "--n", "1000"]) == 0
+    rec = Recording.load(path)
+    assert rec.extra == {"fs": 25_000.0, "timing": timing}
+    assert rec.codes.shape == (5, 1000) and np.ptp(rec.codes) > 100
+    used, real = [], cli.form_image
+
+    def form_image(codes, x_pos, sweep, cal, *args, **kwargs):
+        used.append(cal)
+        return real(codes, x_pos, sweep, cal, *args, **kwargs)
+
+    monkeypatch.setattr(cli, "form_image", form_image)
+    png = str(tmp_path / "img.png")
+    assert cli.main(["sar", "image", path, "--out", png, "--cal", cal_path]) == 0
+    stock = Calibration.load(cal_path)
+    assert used[0] == stock.with_timing(**timing)
+    assert used[0].n0 == pytest.approx(0.018125 + stock.if_delay * 25_000.0)
+    assert cli.recorded_calibration(Recording(rec.codes, SWEEP, rec.t_host)) == (
+        Calibration()
+    )

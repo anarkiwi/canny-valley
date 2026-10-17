@@ -80,21 +80,26 @@ def ramp_length(nr, ng):
     return int(np.floor(nr - 2 * ng))
 
 
-def ramp_positions(n0, nr, ng, n, first_up):
-    """Fractional sample positions `[2, M, Nu]` of the ramps that
-    `extract_ramps` takes from an `n`-sample frame."""
-    k0 = np.ceil(-n0 / nr)
-    start = n0 + k0 * nr
-    up0 = bool(first_up) != bool(int(k0) % 2)
+def ramp_positions(n0, nr, ng, n, first_up, period=None):
+    """Fractional sample positions `[S, M, Nu]` of the ramps that
+    `extract_ramps` takes from an `n`-sample frame: two sets (S = 2) of a
+    triangle, or with `period` one set (S = 1) of sawtooth ramps starting at
+    `n0 + j * period`, all sweeping in the `first_up` direction."""
+    step = nr if period is None else period
+    k0 = np.ceil(-n0 / step)
+    start = n0 + k0 * step
+    up0 = bool(first_up) != (period is None and bool(int(k0) % 2))
     nu = ramp_length(nr, ng)
-    k = np.arange(-1, int(np.ceil(n / nr)) + 1)
-    nk = start + nr * k
+    k = np.arange(-1, int(np.ceil(n / step)) + 1)
+    nk = start + step * k
     m = np.arange(nu)
-    up = (k % 2 == 0) == up0
+    up = np.full(k.size, up0) if period is not None else (k % 2 == 0) == up0
     pos = np.where(up[:, None], nk[:, None] + ng + m, nk[:, None] + nr - ng - m)
     lo = np.floor(pos.min(axis=1)) - INTERP_HALF_WIDTH + 1
     hi = np.floor(pos.max(axis=1)) + INTERP_HALF_WIDTH
     ok = (lo >= 0) & (hi <= n - 1)
+    if period is not None:
+        return pos[ok][None]
     sets = pos[up & ok], pos[~up & ok]
     count = min(len(s) for s in sets)
     return np.stack([s[:count] for s in sets])
@@ -115,15 +120,13 @@ def interpolation_matrix(pos, n):
     )
 
 
-def extract_ramps(x, n0, nr, ng, first_up):
-    """Ramps `[..., 2, M, Nu]` of frames `x[..., N]` (§4.3).
-
-    Set 0: rising-frequency ramps; set 1: falling ones time-reversed. Both are
-    indexed by increasing frequency from `f0 + mu * ng / fs`. `first_up`
-    labels the ramp beginning at the turnaround `n0`.
-    """
+def extract_ramps(x, n0, nr, ng, first_up, period=None):
+    """Ramps `[..., S, M, Nu]` of frames `x[..., N]` (§4.3), indexed by
+    increasing frequency from `f0 + mu * ng / fs`. Triangle: set 0 rising, set
+    1 falling time-reversed; `first_up` labels the ramp from `n0`. Sawtooth
+    (`period`): one set, ramps from `n0 + j * period`, reversed if falling."""
     x = np.asarray(x, dtype=np.float64)
     n = x.shape[-1]
-    pos = ramp_positions(n0, nr, ng, n, first_up)
+    pos = ramp_positions(n0, nr, ng, n, first_up, period)
     out = interpolation_matrix(pos, n) @ x.reshape(-1, n).T
     return out.T.reshape(x.shape[:-1] + pos.shape)

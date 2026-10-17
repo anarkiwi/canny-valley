@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-xdist", "pytest-cov", "black", "pylint", "allantools"]
+dev = ["pytest", "pytest-xdist", "pytest-cov", "pytest-timeout", "black", "pylint", "allantools"]
 
 [project.scripts]
 qmrdk = "qmrdk.cli:main"
@@ -32,6 +32,9 @@ markers = ["hardware: needs the board attached (run with -m hardware)", "slow: f
 
 [tool.coverage.run]
 source = ["qmrdk"]
+
+[tool.black]
+extend-exclude = "^/firmware/radar/lib/"
 
 [tool.pylint.main]
 extension-pkg-allow-list = ["numba", "finufft"]

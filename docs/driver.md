@@ -7,9 +7,9 @@ Host driver for the QM-RDK board over USB, implementing
 
 | Module | Role |
 |--------|------|
-| `qmrdk/transport.py` | The only module that opens USB resources. Discovery (vendor ID `0x2012`, any product ID, `*IDN?` of the form `Quonset Microwave,QM4004,<serial>,<firmware>`, optional serial number), `write` / `query` with LF termination and per-call timeout, the §3.7 error policy (`SYST:ERR?` drained after every setter, non-zero raises `ScpiError` with code and text, `-500 Power on` consumed), frame flush (`CAPT:FRAM?` until `Not Ready`, in place of device clear), reopen by serial number after re-enumeration. Refuses every command outside the documented set (protocol §3.8), including `CAPT:STRE`. |
-| `qmrdk/device.py` | `Device`: typed commands over a `Transport`. `identify`, `settings` (read-back `Sweep`, reference divider, RF, lock), `configure` with host-side validation, `start` / `stop` / `rf`, `temperature`, `status`, `errors`, `reset`, `save` / `recall` / `restore_factory`, `capture` / `capture_many`, guarded `scpi` passthrough. |
-| `qmrdk/radar.py` | `UsbRadar`: the `Radar` protocol (`sweep`, `capture(n)`) over a `Device`, used by scans and calibration. `ManualSled`: the `Sled` protocol by hand; each move prints the position from home (m, cm, mm) and the step on stderr and waits for Enter (`qmrdk sar scan --manual`). |
+| `qmrdk/transport.py` | The only module that opens USB resources. Discovery (vendor ID `0x2012`, any product ID, `*IDN?` of the form `Quonset Microwave,QM4004,<serial>,<firmware>`, optional serial number), `write` / `query` with LF termination and per-call timeout, the §3.7 error policy (`SYST:ERR?` drained after every setter, non-zero raises `ScpiError` with code and text, `-500 Power on` consumed), frame flush (`CAPT:FRAM?` until `Not Ready`, in place of device clear), reopen by serial number after re-enumeration. Refuses every command outside the documented set (protocol §3.8), including `CAPT:STRE`; the CV-only commands (protocol §6.5) are allowed only when `Idn.cv` (firmware field starting with `CV`). `query_block` reads one `#6dddddd` binary block (protocol §6.6). |
+| `qmrdk/device.py` | `Device`: typed commands over a `Transport`. `identify`, `settings` (read-back `Sweep`, reference divider, RF, lock), `configure` with host-side validation, `start` / `stop` / `rf`, `temperature`, `status`, `errors`, `reset`, `save` / `recall` / `restore_factory`, `capture` / `capture_many`, guarded `scpi` passthrough. On CV firmware also `limits` (`Limits`, from `SWEEP:LIM?`), the exact `fs` and `timing()` (`Timing`). |
+| `qmrdk/radar.py` | `UsbRadar`: the `Radar` protocol (`sweep`, `capture(n)`) over a `Device`, used by scans and calibration; `timing` is the device `Timing` of the configured sweep on CV firmware, None on stock. `ManualSled`: the `Sled` protocol by hand; each move prints the position from home (m, cm, mm) and the step on stderr and waits for Enter (`qmrdk sar scan --manual`). |
 | `qmrdk/sled.py` | `HardwareSled`: the `Sled` protocol over the sled controller's serial line protocol ([sled.md](sled.md)). |
 | `qmrdk/sim/scpi.py` | `SimBoard`, `SimResource`, `SimManager`: the firmware's SCPI state machine behind the PyVISA resource and resource-manager interfaces, so the layers above run unchanged against it. |
 
@@ -27,6 +27,20 @@ divider that allows it, at most 256. `Sweep.kind` selects the type by number:
 writes the divider only when it changes, sends `SWEEP:START`, waits for
 `FREQ:LOCK?` to read 1 and keeps the read-back sweep in `Device.sweep`.
 
+On CV firmware (protocol §6) the checks use the board's `Limits`: frequencies
+in `f_min`–`f_max` (2.25–2.5 GHz), stop above start (except CW), a ramp time
+of at most 65536 ms and at least 4 samples (`round(T fs) >= 4`), a slope
+`B fs / Nr` of at least `slope_min`, and `saw` (type 4) as a fifth kind.
+`Sweep.dwell` (s) applies to `saw` only: at least 4 samples, or 0 to keep the
+board's dwell; a dwell on any other kind, or `saw` on stock firmware, is a
+`ConfigError`. The sequence is protocol §6.9: frequencies with 9 decimals,
+the ramp time in decimal ms, `SWEEP:DWEL` for a sawtooth with a dwell, no
+reference divider. Every `settings()` read refreshes `Device.fs` (exactly
+`F_REF / R` from `CAPT:RATE?`) and `Device.limits`, and returns `Settings`
+with the device timing `fs`, `n0`, `first_up` (`SWEEP:ORIG?`; None on stock
+firmware, `Settings.timing` combines them) and `ref_div` 1.
+`Device.timing()` reads the timing of the current sweep.
+
 ## Capture
 
 `capture(n)` follows §3.4: `CAPT:FRAM n`, the first `CAPT:FRAM?` with a
@@ -38,6 +52,22 @@ rebooted. Capture is refused unless the sweep was started and locked in this
 session. `capture_many(n, count)` returns the frames and the host time of
 each `CAPT:FRAM`, with a progress bar; optionally frame starts at least
 `interval` apart and the board temperature before each frame.
+
+On CV firmware `capture(n)` is a stream (protocol §6.8) of any length
+`n >= 1`: `CAPT:CONT n`, then `CAPT:BLOC?` until `n` samples, each block
+checked by `decode_block` (sequence, first sample, count, OVERFLOW, END;
+`FrameError` otherwise). The first read waits for the alignment latency plus
+one block time plus the margin, later reads one block time plus the margin.
+A failed stream is aborted (`CAPT:ABOR`), the error queue drained and the
+stream retried. A tqdm bar shows streams longer than 8 blocks. On connect
+`CAPT:ABOR` precedes the frame flush.
+
+`Transport.query_block` writes the query, makes one `read_raw` and reads the
+rest of the header and payload with `read_bytes(count,
+break_on_termchar=False)`, so a payload byte equal to LF does not end the
+read; pyvisa-py over USBTMC assembles a block spanning several transfers. A
+header other than `#6dddddd`, a short block or a missing final LF raises
+`FrameError`.
 
 ## Safety
 
@@ -77,6 +107,20 @@ times out), `disconnect` (reboot), `unplug` (never returns);
 or a function of the number of frames captured; the default source
 synthesises its `hardware` (§4.1 of simulation.md) at that temperature.
 
+`SimBoard(firmware="CV1.0.0")` (any firmware starting with `CV`) emulates
+protocol §6: RF off at power-up, the §6.2 ranges with error 201, the Q24
+and whole-sample quantisation of §6.3 in every read-back, `SWEEP:START`
+refused for a zero step, `SWEEP:ORIG?`, `SWEEP:LIM?`, `CAPT:RATE`,
+`SWEEP:DWEL`, `POWE:RF:TIME`, `CAPT:CONT` / `CAPT:BLOC?` / `CAPT:ABOR` and
+`CAPT:FRAM` with the alignment latency of §6.7, and none of the stock-only
+commands. Its source is called `source(n, sweep, timing)` with the device
+timing `(fs, n0, first_up)`; the default source runs the board model at
+that timing (simulation.md §5). The `overflow` fault drops the block before
+the second; `truncate` and `nonhex` corrupt the first block's count and
+header. `SimResource` implements `read`, `read_raw` (up to `chunk_size`
+bytes) and `read_bytes` (exactly `count` bytes, unmodified) as pyvisa-py over
+USBTMC does.
+
 Where the protocol leaves behaviour open the simulator assumes: `SYST:PRES`
 restores memory location 0 without rebooting, `SYST:STAT?` reads
 `0,"Operational"`, `SYST:MODNUM?` reads `QM4004`.
@@ -87,7 +131,7 @@ restores memory location 0 without rebooting, `SYST:STAT?` reads
 |---------|--------|------------|
 | `qmrdk list` | resources and `*IDN?` | off |
 | `qmrdk info` | identity, settings, lock, temperature, status, error queue (JSON) | off |
-| `qmrdk set --f0 --f1 --ramp-time --type` | configure, start, print read-back | on, sweeping as set |
+| `qmrdk set --f0 --f1 --ramp-time --type [--dwell MS]` | configure, start, print read-back | on, sweeping as set |
 | `qmrdk rf on\|off` | start (locked) or stop the sweep | as requested |
 | `qmrdk scpi CMD [--force]` | guarded raw command or query | off |
 | `qmrdk capture --frames K --n N --out rec.npz [--interval S] [--temperature]` | configure (sweep options as `set`) and record | off |
@@ -96,9 +140,15 @@ restores memory location 0 without rebooting, `SYST:STAT?` reads
 | `qmrdk drift rec.npz --cal cal.json [--lines 3] [--out drift.png] [--report drift.json]` | phase drift of a static capture (signal-processing §9.1) | n/a |
 
 Every command takes `--sim` (process-wide simulated board),
-`--resource NAME` and `--serial N`. `capture` writes a native recording
+`--resource NAME` and `--serial N`. `--type saw` and `--dwell` (ms, 0 keeps
+the board's) need CV firmware; `--f0`, `--f1` and `--ramp-time` are checked
+against the board's limits there. `info` adds the device timing and limits
+on CV firmware. `capture` writes a native recording
 (§5) with `t_host` and, in `extra`, the `*IDN?` fields, resource, reference
-divider and sample rate. `--interval` sets the minimum time between frame
+divider and sample rate (the exact `fs` on CV firmware, plus `timing` =
+`{fs, n0, first_up}`). `sar scan` records `fs` and `timing` the same way;
+`sar image` and `drift` apply a recorded `timing` to the calibration
+(`Calibration.with_timing`). `--interval` sets the minimum time between frame
 starts; `--temperature` reads `SYST:TEMP?` before each frame into the
 recording's `temperature`.
 

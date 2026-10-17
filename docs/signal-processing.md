@@ -9,14 +9,14 @@ and MATLAB scripts. Acquisition is defined in [protocol.md](protocol.md).
 | Symbol | Meaning | Value / unit |
 |--------|---------|--------------|
 | `c` | speed of light | 299 792 458 m/s |
-| `fs` | ADC sample rate (measured; 16 MHz / 728 from the controller clock, not locked to the sweep reference; the vendor documents 20 000) | 21 977 Hz |
+| `fs` | ADC sample rate (measured; 16 MHz / 728 from the controller clock, not locked to the sweep reference; the vendor documents 20 000). CV firmware: exactly `F_REF / R` (protocol §6.2) | 21 977 Hz; CV firmware 25 000 Hz by default |
 | `N` | samples per capture | 1 – 4096 |
 | `f0`, `f1` | sweep start / stop frequency (read back from the device) | Hz |
 | `B` | swept bandwidth `f1 - f0` | Hz, ≤ 100e6 |
 | `fc` | centre frequency `(f0 + f1) / 2`; in CW type `fc = f0` | Hz |
 | `lam` | wavelength `c / fc` | m |
 | `T` | one-way ramp time | s |
-| `Nr` | samples per ramp `T * fs` | not an integer (351.6 for 16 ms) |
+| `Nr` | samples per ramp `T * fs` | not an integer (351.6 for 16 ms); CV firmware: `round(T * fs)`, an integer |
 | `mu` | sweep slope `B / T` | Hz/s |
 | `R` | target range | m |
 | `v` | target radial speed, positive approaching | m/s |
@@ -108,6 +108,11 @@ In order of preference:
 2. **Mirror-symmetry estimator** (§4.2) for continuous recordings from the
    audio tap, where no frame boundary marks the sweep.
 
+With CV firmware the device timing (`fs`, `n0`, `first_up`, protocol §6.3)
+and the measured `if_delay` ([calibration.md](calibration.md), CV firmware)
+give the segmentation directly: `n_0 = n0 + if_delay * fs`
+(`Calibration.with_timing`), with no restart transient on continuous sweeps.
+
 Because `Nr` is not an integer, ramp boundaries fall at fractional sample
 positions and §4.3 resampling applies to every product that combines ramps
 coherently.
@@ -192,6 +197,18 @@ the ramp that begins at `n_0`; `n_0` may be any real and is normalised to the
 first turnaround at or after sample 0, flipping the label for an odd shift.
 `Ng` at least the interpolator half-width keeps the support off the
 turnaround kink. Output: `ramps[set, ramp, Nu]`.
+
+### 4.4 Sawtooth segmentation
+
+A sawtooth sweep (CV firmware, type 4) has one set of ramps, starting at
+`n_0 + j*P` with period `P = (T + dwell) * fs` samples
+(`Calibration.period(sweep)`), all sweeping in the `first_up` direction.
+Sample `m` of ramp `j` is taken at `n_0 + j*P + Ng + m`, or for falling ramps
+at `n_0 + j*P + Nr - Ng - m` (time-reversed), so the set indexes increasing
+sweep frequency as in §4.3, with the same interpolator, length `Nu` and
+support rule. The dwell between ramps is discarded. Output:
+`ramps[1, M, Nu]`; products that average over sets (§5, §9.1, §11.2) apply
+unchanged.
 
 ## 5. Range profile
 

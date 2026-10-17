@@ -17,8 +17,12 @@ keeps the RF off outside captures; every board command also runs against a
 simulated board with `--sim`. The sled driver ([docs/sled.md](docs/sled.md))
 steps the radar along the rail for scans and calibration steps 3 and 4, on
 hardware or against the simulated board and scene; `firmware/sled` is the
-sled controller's Arduino firmware, built, tested and flashed with
-`docker/firmware.Dockerfile`.
+sled controller's Arduino firmware and `firmware/radar` replacement firmware
+for the board's controller ([docs/firmware.md](docs/firmware.md)), both
+built and tested with `docker/firmware.Dockerfile`. The host uses the
+replacement firmware's sample clock locked to the synthesiser, exact sweep
+timing and binary streaming when it detects it, and the stock protocol
+otherwise.
 
 ## Install
 
@@ -65,6 +69,7 @@ simulated sweep. Scenes are JSON files; built-in scenes are in
 * [Simulation model](docs/simulation.md)
 * [Calibration procedure](docs/calibration.md)
 * [Board notes](docs/hardware.md)
+* [Controller firmware](docs/firmware.md)
 * [Programming the controller (PICkit 5)](docs/programming.md)
 
 Vendor documentation ([Quonset Microwave QM-RDKIT](https://www.quonsetmicrowave.com/QM-RDKIT-p/qm-rdkit.htm)):

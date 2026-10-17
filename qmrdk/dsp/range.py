@@ -46,7 +46,7 @@ def centre_frequency(sweep, cal, nu):
 
 def _ramps(codes, sweep, cal, first_up):
     x = codes_to_volts(codes)
-    ramps = extract_ramps(x, cal.n0, cal.nr(sweep), cal.ng, first_up)
+    ramps = extract_ramps(x, cal.n0, cal.nr(sweep), cal.ng, first_up, cal.period(sweep))
     if ramps.shape[-2] == 0:
         raise ValueError("frame holds no complete ramp of each direction")
     return ramps
@@ -56,7 +56,8 @@ def range_profile(codes, sweep, cal, coherent=True, window="hann", zpad=4):
     """Range profile `(r, level_dbfs)` of frames `codes[..., N]` (§5).
 
     Coherent: complex mean over the ramps of each set, then the mean of the
-    two sets' powers. Noncoherent: mean power over all ramps.
+    sets' powers (one set for a sawtooth). Noncoherent: mean power over all
+    ramps.
     """
     first_up = True if cal.first_up is None else cal.first_up
     spec = range_spectrum(_ramps(codes, sweep, cal, first_up), window, zpad)

@@ -47,7 +47,9 @@ def phase_history(
     (mean ramp `[Nu]` or `[P, Nu]` of an empty-scene scan) is subtracted, None
     leaves the ramps unchanged.
     """
-    ramps = extract_ramps(as_volts(codes), cal.n0, cal.nr(sweep), cal.ng, first_up)
+    ramps = extract_ramps(
+        as_volts(codes), cal.n0, cal.nr(sweep), cal.ng, first_up, cal.period(sweep)
+    )
     if ramps.shape[-2] == 0:
         raise ValueError("frames hold no complete ramp of each direction")
     mean = ramps.mean(axis=(-3, -2))

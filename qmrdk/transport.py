@@ -1,9 +1,11 @@
-"""USBTMC transport to the QM-RDK over PyVISA (docs/protocol.md §1, §2, §3.7):
-discovery, write/query, the SCPI error policy, frame flush and reopen after
-re-enumeration. The only module that opens USB resources."""
+"""USBTMC transport to the QM-RDK over PyVISA (docs/protocol.md §1, §2, §3.7,
+§6): discovery, write/query, binary block reads, the SCPI error policy, frame
+flush and reopen after re-enumeration. The only module that opens USB
+resources."""
 
 import contextlib
 import dataclasses
+import re
 import time
 
 from pyvisa import constants, errors, rname
@@ -56,6 +58,19 @@ DOCUMENTED = (
     "*TST",
     "*WAI",
 )
+CV_ONLY = (
+    "SWEEP:DWEL",
+    "SWEEP:ORIG",
+    "SWEEP:LIM",
+    "CAPT:RATE",
+    "CAPT:CONT",
+    "CAPT:ABOR",
+    "CAPT:BLOC",
+    "POWE:RF:TIME",
+)
+CV_PREFIX = "CV"
+BLOCK_HEAD = re.compile(rb"#6(\d{6})")
+HEAD_LEN = 8
 
 
 class DeviceError(RuntimeError):
@@ -83,6 +98,11 @@ class ForbiddenCommand(DeviceError):
     """A command outside the documented set the host uses (protocol §3)."""
 
 
+class FrameError(DeviceError):
+    """Capture data failed validation: a `CAPT:FRAM?` chunk (protocol §3.4)
+    or a `CAPT:BLOC?` block (§6)."""
+
+
 @dataclasses.dataclass(frozen=True)
 class Idn:
     """`*IDN?` fields."""
@@ -98,6 +118,11 @@ class Idn:
         if len(fields) != 4 or fields[:2] != [MAKER, MODEL]:
             raise DeviceError(f"not a QM-RDK: {resp.strip()!r}")
         return cls(*fields)
+
+    @property
+    def cv(self) -> bool:
+        """CV replacement firmware (protocol §6)."""
+        return self.firmware.startswith(CV_PREFIX)
 
 
 def _manager():
@@ -145,10 +170,11 @@ def resources(manager=None, serial: str | None = None) -> list[str]:
     return out
 
 
-def forbidden(message: str) -> str | None:
+def forbidden(message: str, extra=()) -> str | None:
     """The first command of `message` outside the documented set the host
-    uses (protocol §3), else None. Long forms and a leading colon are matched
-    through their short-form prefixes."""
+    uses (protocol §3) and the commands `extra`, else None. Long forms and a
+    leading colon are matched through their short-form prefixes."""
+    allowed = [d.split(":") for d in (*DOCUMENTED, *extra)]
     for cmd in message.split(";"):
         head = cmd.strip().split(maxsplit=1)[0:1]
         if not head:
@@ -156,7 +182,7 @@ def forbidden(message: str) -> str | None:
         nodes = head[0].upper().lstrip(":").rstrip("?").split(":")
         if not any(
             len(nodes) == len(short) and all(map(str.startswith, nodes, short))
-            for short in (d.split(":") for d in DOCUMENTED)
+            for short in allowed
         ):
             return cmd.strip()
     return None
@@ -220,13 +246,32 @@ class Transport:
             f"no QM-RDK found{which}" + "".join(f"; {f}" for f in failures)
         )
 
+    @property
+    def allowed_extra(self) -> tuple[str, ...]:
+        """Commands allowed beyond the documented set: the CV-only commands
+        when the board runs CV firmware."""
+        return CV_ONLY if self.idn is not None and self.idn.cv else ()
+
     def _call(self, method: str, cmd: str):
-        bad = forbidden(cmd)
+        bad = forbidden(cmd, self.allowed_extra)
         if bad:
             raise ForbiddenCommand(f"refusing undocumented {bad!r} (protocol §3)")
         if self.res is None:
             raise Disconnected(f"{cmd}: not connected")
         return _io(getattr(self.res, method), cmd)
+
+    @contextlib.contextmanager
+    def _timeout(self, timeout: int | None):
+        """Resource timeout `timeout` (ms) inside the block, if given."""
+        if timeout is None or self.res is None:
+            yield
+            return
+        old, self.res.timeout = self.res.timeout, timeout
+        try:
+            yield
+        finally:
+            with contextlib.suppress(errors.Error, OSError):
+                self.res.timeout = old
 
     def write(self, cmd: str) -> None:
         """Send a program message without checking the error queue."""
@@ -234,14 +279,28 @@ class Transport:
 
     def query(self, cmd: str, timeout: int | None = None) -> str:
         """Send a query and read its response; `timeout` (ms) for this call only."""
-        if timeout is None or self.res is None:
+        with self._timeout(timeout):
             return self._call("query", cmd).strip()
-        old, self.res.timeout = self.res.timeout, timeout
-        try:
-            return self._call("query", cmd).strip()
-        finally:
-            with contextlib.suppress(errors.Error, OSError):
-                self.res.timeout = old
+
+    def query_block(self, cmd: str, timeout: int | None = None) -> bytes:
+        """Send a query and read one IEEE 488.2 definite-length block
+        `#6dddddd<payload>LF` (protocol §6) as raw bytes, without termination
+        character handling: one raw read, then the remainder by count. Returns
+        the payload; FrameError if the response is not such a block."""
+        with self._timeout(timeout):
+            self._call("write", cmd)
+            raw = _io(self.res.read_raw)
+            if len(raw) < HEAD_LEN:
+                raw += _io(self.res.read_bytes, HEAD_LEN - len(raw), None, False)
+            head = BLOCK_HEAD.fullmatch(raw[:HEAD_LEN])
+            if head is None:
+                raise FrameError(f"{cmd}: malformed block header {raw[:8]!r}")
+            size = HEAD_LEN + int(head[1]) + 1
+            if len(raw) < size:
+                raw += _io(self.res.read_bytes, size - len(raw), None, False)
+        if len(raw) != size or raw[-1:] != b"\n":
+            raise FrameError(f"{cmd}: block of {len(raw)} bytes, header says {size}")
+        return bytes(raw[HEAD_LEN:-1])
 
     def errors(self, power_on: bool = False) -> list[tuple[int, str]]:
         """Drain the error queue; `-500 Power on` is consumed silently unless

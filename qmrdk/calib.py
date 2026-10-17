@@ -17,7 +17,7 @@ from scipy.interpolate import CubicSpline
 from scipy.optimize import least_squares
 from scipy.signal import butter, find_peaks, get_window, sosfiltfilt
 
-from qmrdk.config import Calibration, ScanGeometry, Sweep
+from qmrdk.config import Calibration, ScanGeometry, Sweep, Timing
 from qmrdk.constants import C, FS_NOMINAL
 from qmrdk.dsp.convert import as_volts
 from qmrdk.dsp.range import range_spectrum
@@ -75,6 +75,14 @@ def _highpass(x, cutoff, order=HP_ORDER):
     cycles/sample; mirror points are unchanged."""
     sos = butter(order, 2.0 * cutoff, "highpass", output="sos")
     return sosfiltfilt(sos, x - x.mean(axis=-1, keepdims=True), axis=-1)
+
+
+def _triangle(sweep, step):
+    """Refuse a sawtooth for estimators that rest on triangle mirror symmetry."""
+    if sweep.kind == "saw":
+        raise ValueError(
+            f"{step} relies on triangle mirror symmetry: use a triangle sweep"
+        )
 
 
 def _frame_stats(frames):
@@ -167,13 +175,13 @@ def estimate_timing(
     guard=INTERP_HALF_WIDTH,
     window="hann",
     iterations=4,
+    fix_fs=False,
 ):
-    """Clock ratio `fs` and apparent first turnaround `n0` from static frames.
-
-    Each turnaround is where the ramps either side have equal phase at the
-    strongest beat line beyond the DC main lobe, from the mirror estimate of
-    the high-passed frame (its correlation picks the half-beat-period branch).
-    """
+    """Clock ratio `fs` and apparent first turnaround `n0` from static frames:
+    turnarounds where the ramps either side have equal phase at the strongest
+    beat line beyond the DC main lobe, branch from the high-passed mirror
+    correlation. `fix_fs`: `fs_nominal` is exact and only `n0` is fitted."""
+    _triangle(sweep, "timing")
     x, noise_var, k_frames = _frame_stats(frames)
     nr = sweep.ramp_time * fs_nominal
     lobe = window_lobes(window, ramp_length(nr, guard))[0]
@@ -188,10 +196,11 @@ def estimate_timing(
             kp, omega = _beat_line(spec, lobe, ramps.shape[-1])
             turn = j[1:].astype(np.float64)
             nk = _turnarounds(spec, kp, omega, n0, nr, turn)
-            design = np.column_stack([np.ones_like(turn), turn])
-            coef = np.linalg.lstsq(design, nk, rcond=None)[0]
-            resid = nk - design @ coef
-            n0, nr = float(coef[0]), float(coef[1])
+            design = np.column_stack([np.ones_like(turn), turn])[:, : 2 - fix_fs]
+            target = nk - turn * nr if fix_fs else nk
+            coef = np.linalg.lstsq(design, target, rcond=None)[0]
+            resid = target - design @ coef
+            n0, nr = float(coef[0]), nr if fix_fs else float(coef[1])
         branch = n0 + np.pi / omega * np.arange(
             -np.ceil(guard * omega / np.pi), np.ceil(guard * omega / np.pi) + 1
         )
@@ -199,13 +208,14 @@ def estimate_timing(
         if best == n0:
             break
         n0 = float(best)
-    cov = resid @ resid / max(turn.size - 2, 1) * np.linalg.inv(design.T @ design)
+    dof = max(turn.size - design.shape[1], 1)
+    cov = resid @ resid / dof * np.linalg.inv(design.T @ design)
     jitter = 0.0
     if k_frames > 1:
         per = range_spectrum(_centred_ramps(_volts(frames), n0, nr, guard)[0], window)
         nkf = _turnarounds(per, kp, omega, n0, nr, turn)
         jitter = float((nkf - turn * nr).mean(axis=1).std(ddof=1))
-    se = np.sqrt(np.diag(cov))
+    se = np.append(np.sqrt(np.diag(cov)), 0.0)[:2]
     return TimingResult(
         fs=nr / sweep.ramp_time,
         n0=float(np.mod(n0, nr)),
@@ -219,6 +229,48 @@ def estimate_timing(
         turnarounds=int(turn.size),
         noise_var=noise_var,
         frames=k_frames,
+    )
+
+
+@dataclasses.dataclass
+class IfDelayResult:
+    """IF delay (step 1 with CV firmware): the step 1 apparent turnaround at
+    the device's exact `fs` less the commanded one, in seconds."""
+
+    if_delay: float
+    se_if_delay: float
+    device: Timing
+    estimate: TimingResult
+
+    @property
+    def noise_var(self):
+        return self.estimate.noise_var
+
+    def apply(self, cal):
+        cal = dataclasses.replace(cal, if_delay=self.if_delay)
+        return cal.with_timing(**dataclasses.asdict(self.device))
+
+    def summary(self):
+        return _floats(
+            {
+                "if_delay": self.if_delay,
+                "se_if_delay": self.se_if_delay,
+                "device": dataclasses.asdict(self.device),
+                "estimate": self.estimate.summary(),
+            }
+        )
+
+
+def estimate_if_delay(frames, sweep, timing, guard=INTERP_HALF_WIDTH, window="hann"):
+    """`if_delay` from static frames and the device `Timing`: `estimate_timing`
+    with `fs` held at the device's, its `n0` less the device `n0` (modulo `Nr`)."""
+    est = estimate_timing(frames, sweep, timing.fs, guard, window, fix_fs=True)
+    delay = np.mod(est.n0 - timing.n0 + 0.5 * est.nr, est.nr) - 0.5 * est.nr
+    return IfDelayResult(
+        if_delay=float(delay / timing.fs),
+        se_if_delay=est.se_n0 / timing.fs,
+        device=timing,
+        estimate=est,
     )
 
 
@@ -298,6 +350,7 @@ def estimate_first_up(
     turns the same way as the range changes. Timing is `cal`'s, or estimated
     from the first set if `cal` holds the nominal `fs` and `n0`.
     """
+    _triangle(sweep, "first-up")
     if np.ndim(frames) != 3:
         raise ValueError("first_up needs a pair of frame sets (--pair)")
     if cal is None or (cal.fs, cal.n0) == (Calibration.fs, Calibration.n0):
@@ -348,6 +401,7 @@ def estimate_guard(frames, sweep, cal, window="hann", zpad=4, taps=EQ_TAPS):
     """Smallest guard from which on the turnaround transient's range spectrum
     stays below the window's peak sidelobe relative to the ramp peak, both
     beyond the window main lobe of zero range (frames high-passed there)."""
+    _triangle(sweep, "guard")
     x, noise_var, k_frames = _frame_stats(frames)
     n = x.shape[-1]
     nr = cal.nr(sweep)
@@ -429,7 +483,7 @@ class _ReflectorModel:
         nr = cal.nr(sweep)
         nu = ramp_length(nr, cal.ng)
         self.ramp_pos = ramp_positions(
-            cal.n0, nr, cal.ng, np.shape(codes)[-1], first_up
+            cal.n0, nr, cal.ng, np.shape(codes)[-1], first_up, cal.period(sweep)
         )
         ph = phase_history(codes, sweep, cal, first_up, None, window, 1)
         self.f_m = ph.f_m
@@ -950,8 +1004,9 @@ def default_target(geometry, length=1.5):
     )
 
 
-def sim_devices(hw, sweep, geometry, target, seed=0, sled_sigma=0.0):
-    """Simulated radar and sled on `builtin_scene("single")`, reflector at `target`."""
+def sim_devices(hw, sweep, geometry, target, seed=0, sled_sigma=0.0, timing=None):
+    """Simulated radar and sled on `builtin_scene("single")`, reflector at
+    `target`; the radar reports the device `timing` (CV firmware) if given."""
     # pylint: disable=import-outside-toplevel
     from qmrdk.sim.devices import SimRadar, SimSled
     from qmrdk.sim.scene import builtin_scene, compile_scene
@@ -960,7 +1015,8 @@ def sim_devices(hw, sweep, geometry, target, seed=0, sled_sigma=0.0):
     scene["objects"] = [dict(scene["objects"][0], pos=list(map(float, target)))]
     sled = SimSled(sigma=sled_sigma, seed=seed)
     geom = compile_scene(scene, sweep.lam)
-    return SimRadar(geom, hw, sweep, sled, geometry, seed + 1), sled
+    radar = SimRadar(geom, hw, sweep, sled, geometry, seed + 1, timing)
+    return radar, sled
 
 
 def nominal(offsets, baseline=None):
@@ -986,14 +1042,20 @@ def calibrate(
     length=1.5,
     n=4096,
 ):
-    """Steps 1–4 in order on any radar and sled: `(Calibration, report)`."""
+    """Steps 1–4 in order on any radar and sled: `(Calibration, report)`. A
+    radar with device `timing` (CV firmware) has step 1 measure only the IF
+    delay and keeps the device `first_up` over step 3's."""
     t0 = time.time()
     sweep = radar.sweep
+    device = getattr(radar, "timing", None)
     sled.home()
     static = run_timing(
         radar, n, frames, sled, pair_step(sweep, geometry, target, 0.0, length)
     )
-    timing = estimate_timing(static, sweep, start.fs)
+    if device is None:
+        timing = estimate_timing(static, sweep, start.fs)
+    else:
+        timing = estimate_if_delay(static, sweep, device)
     cal = timing.apply(start)
     guard = estimate_guard(static, sweep, cal)
     if guard.ng is None:
@@ -1009,6 +1071,9 @@ def calibrate(
         "guard": guard.summary(),
         "reflector": refl.summary(),
     }
+    if device is not None:
+        cal = cal.with_timing(**dataclasses.asdict(device))
+        report["reflector"]["first_up_agrees"] = refl.first_up == device.first_up
     if repeats > 1:
         more = run_repeat(radar, sled, geometry, target, length, n, repeats - 1)
         rep = estimate_repeatability(
@@ -1053,6 +1118,7 @@ def run_step(args):
     geometry = ScanGeometry(height=args.height)
     target = tuple(args.target or default_target(geometry, args.length))
     step = args.calib_command
+    timing = None
     try:
         if step == "sim":
             cal, report = calibrate_sim(
@@ -1081,13 +1147,21 @@ def run_step(args):
                     cal = cal if path and path.is_file() else nominal(hw)
                 elif step in (*_STATIC, "reflector") and _recorded(args):
                     radar, sled = None, None
+                    timing = _file_timing(args.frames_file)
                 else:
                     sled = None if step in _STATIC else HardwareSled()
                     radar = stack.enter_context(
                         UsbRadar(sweep=Sweep(ramp_time=args.ramp_time * 1e-3))
                     )
-                res = _STEPS[step](args, radar, sled, geometry, target, cal)
+                    timing = radar.timing
+                if timing is not None:
+                    cal = cal.with_timing(**dataclasses.asdict(timing))
+                res = _STEPS[step](args, radar, sled, geometry, target, cal, timing)
             cal, report = res.apply(cal), {step: res.summary()}
+            if timing is not None:
+                cal = cal.with_timing(**dataclasses.asdict(timing))
+                if step == "reflector":
+                    report[step]["first_up_agrees"] = res.first_up == timing.first_up
     except (NotImplementedError, ValueError, DeviceError) as exc:
         print(f"qmrdk calib: {exc}", file=sys.stderr)
         return 2
@@ -1109,6 +1183,14 @@ def _recorded(args):
 def _load_frames(path):
     with np.load(path) as f:
         return f["codes"], Sweep(**json.loads(str(f["sweep"])))
+
+
+def _file_timing(path):
+    """Device `Timing` stored with static frames or a scan recording, else None."""
+    with np.load(path) as f:
+        extra = json.loads(str(f["meta"]))["extra"] if "meta" in f else {}
+        timing = json.loads(str(f["timing"])) if "timing" in f else extra.get("timing")
+    return None if timing is None else Timing(**timing)
 
 
 def _static(args, radar, sled, geometry, target, cal, check=TIMING_PAIR):
@@ -1135,8 +1217,11 @@ def _static(args, radar, sled, geometry, target, cal, check=TIMING_PAIR):
             _check_pair(phi, radar.sweep, check, not args.away)
         codes, sweep = run_timing(radar, args.n, args.frames, sled, dx), radar.sweep
         if args.frames_file:
-            meta = json.dumps(dataclasses.asdict(sweep))
-            np.savez_compressed(args.frames_file, codes=codes, sweep=meta)
+            meta = {"sweep": json.dumps(dataclasses.asdict(sweep))}
+            timing = getattr(radar, "timing", None)
+            if timing is not None:
+                meta["timing"] = json.dumps(dataclasses.asdict(timing))
+            np.savez_compressed(args.frames_file, codes=codes, **meta)
     if first is not None:
         if first[1] != sweep or np.shape(first[0]) != codes.shape:
             raise ValueError(f"{args.pair} does not match the second frame set")
@@ -1162,15 +1247,27 @@ def _baseline(args, cal):
 
 _STATIC = ("timing", "guard", "first-up")
 
+
+def _timing_step(a, r, s, g, t, c, timing):
+    """Step 1, or with device `timing` (CV firmware) the IF delay."""
+    codes, sweep = _static(a, r, s, g, t, c)
+    if timing is None:
+        return estimate_timing(codes, sweep, c.fs)
+    return estimate_if_delay(codes, sweep, timing)
+
+
+def _first_up_step(a, r, s, g, t, c, timing):
+    """Step 3a, or with device `timing` (CV firmware) its `first_up`."""
+    if timing is not None:
+        return FirstUpResult(timing.first_up, math.nan, math.nan, c.n0)
+    return estimate_first_up(*_static(a, r, s, g, t, c, FIRST_UP_PAIR), c, not a.away)
+
+
 _STEPS = {
-    "timing": lambda a, r, s, g, t, c: estimate_timing(
-        *_static(a, r, s, g, t, c), c.fs
-    ),
-    "guard": lambda a, r, s, g, t, c: estimate_guard(*_static(a, r, s, g, t, c), c),
-    "first-up": lambda a, r, s, g, t, c: estimate_first_up(
-        *_static(a, r, s, g, t, c, FIRST_UP_PAIR), c, not a.away
-    ),
-    "reflector": lambda a, r, s, g, t, c: estimate_reflector(
+    "timing": _timing_step,
+    "guard": lambda a, r, s, g, t, c, _: estimate_guard(*_static(a, r, s, g, t, c), c),
+    "first-up": _first_up_step,
+    "reflector": lambda a, r, s, g, t, c, _: estimate_reflector(
         *_reflector_scan(a, r, s, g, t),
         c,
         g,
@@ -1178,7 +1275,7 @@ _STEPS = {
         _baseline(a, c),
         offset_sigma=a.offset_sigma,
     ),
-    "repeat": lambda a, r, s, g, t, c: estimate_repeatability(
+    "repeat": lambda a, r, s, g, t, c, _: estimate_repeatability(
         run_repeat(r, s, g, t, a.length, a.n, a.scans),
         r.sweep,
         c,
@@ -1189,9 +1286,10 @@ _STEPS = {
 }
 
 _HELP = {
-    "timing": "step 1: fs and n0 from static frame pairs",
+    "timing": "step 1: fs and n0 from static frame pairs (CV firmware: if_delay)",
     "guard": "step 2: turnaround guard ng",
-    "first-up": "step 3a: first_up from static sets before and after a small move",
+    "first-up": "step 3a: first_up from static sets before and after a small move "
+    "(CV firmware: reported by the board)",
     "reflector": "step 3: first_up, r_cal and antenna offsets",
     "repeat": "step 4: sled repeatability",
     "sim": "steps 1-4 on the simulated board",
