@@ -1,4 +1,4 @@
-FROM ubuntu:24.04 AS xc16
+FROM ubuntu:25.10 AS xc16
 ARG XC16=2.10 \
     XC16_SHA256=d64d5e7391ec862d4dd169361b6680b725f8960435121709b45eb1a4afe15dc8
 RUN apt-get update && apt-get install -y --no-install-recommends \
