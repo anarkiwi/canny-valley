@@ -56,7 +56,7 @@ Pins not listed are unused outputs, except the supplies.
 
 | Pin | Port | Dir | Idle | Function | Conf |
 |---|---|---|---|---|---|
-| 1 | RE5 | out | 1 | status LED, active low: 0 while the USB device is configured | M |
+| 1 | RE5 | out | 1 | D3 (the LED beside the `USB` silkscreen), active low: lit while the USB device is configured | H |
 | 11 | RB5 | out | 0 | **RF enable, active low** (§4.6) | M |
 | 14 | RB2 | out | 0 | Bluetooth module control line, pulsed during module set-up | L |
 | 15 | RB1 | in | — | PGEC1, J1 | H |
@@ -79,7 +79,7 @@ Pins not listed are unused outputs, except the supplies.
 | 53 | RD5 (RP20) | out | — | SCK1 | H |
 | 54 | RD6 | out | 1 | temperature sensor CS, active low | H |
 | 55 | RD7 | out | 0 | ADC CNV (convert start / read enable) | H |
-| 63 | RE3 | in | — | reset request: any level change restarts the controller (source unknown: button or module status line) | M |
+| 63 | RE3 | in | — | any level change restarts the controller; routed through a via, source not traced; may be ignored by a replacement program | M |
 | 64 | RE4 | out | 1 | LED driver CS, active low | H |
 
 All analogue inputs are configured digital (AD1PCFGL = `0xFFFF`); the
@@ -223,7 +223,6 @@ connectors P1 and P2 capped.
 * Temperature sensor location and part.
 * HMC703 register semantics are from the register layout and behaviour;
   check 06h, 07h, 08h, 0Bh and 0Fh against the HMC703 datasheet.
-* RE3 source.
 * The Bluetooth module (§4.7, RB2) is not needed for USB-only control and
   can be left unconfigured.
 * EEPROM slot stride (§4.4), from a dump of U1.
