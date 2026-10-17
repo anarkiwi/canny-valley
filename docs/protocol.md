@@ -128,6 +128,9 @@ Side effects:
 * In types 0 and 1 a frame shows a single sweep of duration `T` at its start
   and nothing after it (H). Whether type 1 produces a down ramp is unresolved.
 
+CV firmware accepts decimal ramp times, adds type 4 (sawtooth) and returns
+201 for out-of-range parameters (§6).
+
 ### 3.2 RF output
 
 | Command | Query | Meaning | Default | Tag |
@@ -171,6 +174,10 @@ sweeps up to one LSB per step less than requested; the shortfall matters for
 long ramps over small bandwidths (hardware.md §4.1). The host stores the
 read-back settings, not the realised bandwidth. The host refuses to capture unless it reads 1 after
 `SWEEP:START`.
+
+CV firmware has no reference divider (f_PD is always 20 MHz), a 2.25–2.5 GHz
+range and the slope rule `slope >= f_ref^2 / 2^24`, and reads back the
+realised sweep (§6).
 
 ### 3.4 Capture
 
@@ -241,6 +248,9 @@ There is no continuous streaming over USB. Consecutive frames are separated
 by the read-out time (`ceil(n/31)` request/response round trips) and are
 timestamped on the host at step 1.
 
+CV firmware streams acquisitions of any length as binary blocks, at a
+sample rate locked to the synthesiser reference and known exactly (§6).
+
 ### 3.5 System
 
 | Command | Response | Tag |
@@ -305,7 +315,8 @@ The light bar on the board (10 segments) flashes while an error is queued (M).
 The host sends only the commands documented in the user manual and listed in
 §3.1–3.6; any other header is refused before it reaches the board
 (`qmrdk/transport.py`). `CAPT:STRE` (Bluetooth streaming) and `SYST:BLUE?`
-are documented but not used.
+are documented but not used. The CV-only commands of §6.5 are allowed only
+when `*IDN?` reports CV firmware.
 
 ## 4. Session sequences
 
@@ -352,12 +363,192 @@ Native recording: one compressed `.npz` per recording holding
 | `t_host` | `float64 [captures]` | host UNIX time at `CAPT:FRAM` |
 | `x_pos` | `float64 [captures]`, SAR scans only | sled position, m |
 | `temperature` | `float64 [captures]`, optional | `SYST:TEMP?` read before each `CAPT:FRAM`, °C |
-| `meta` | JSON string | start/stop frequency (GHz), ramp time (ms), sweep type, reference divider, sample rate, `*IDN?` fields, software version |
+| `meta` | JSON string | start/stop frequency (GHz), ramp time (ms), sweep type, reference divider, sample rate, `*IDN?` fields, software version; with CV firmware also the device timing (§6.10) |
 
 Vendor CSV (import/export, for exchange with files saved by the Windows GUI)
 (S): one header row, then one row per sample with columns time (s),
 amplitude (V), and on the first data row start frequency (GHz), stop
 frequency (GHz), ramp time (ms).
+
+## 6. CV firmware
+
+Replacement controller firmware ([firmware.md](firmware.md) holds its
+design). It keeps the USB identity of §1 and the stock commands the host
+sends, locks the sample clock to the synthesiser reference and adds
+streaming. Everything in this section is the firmware's specification, not
+hardware observation.
+
+### 6.1 Detection
+
+The firmware field of `*IDN?` starts with `CV`:
+`Quonset Microwave,QM4004,<serial>,CV1.0.0`. The host selects its CV path
+from it (`Idn.cv`).
+
+### 6.2 Constants
+
+| Name | Value | Meaning |
+|------|-------|---------|
+| `F_REF` | 20 MHz | synthesiser reference, equal to the phase-detector rate f_PD |
+| `R` | default 800, range 500 – 16383 | sample clock divider: `fs = F_REF / R` exactly (25 kHz default, 1220.78 Hz – 40 kHz) |
+| `f_min`, `f_max` | 2.25, 2.5 GHz | frequency range |
+| `slope_min` | `F_REF^2 / 2^24` = 23 841 857.91 Hz/s | sweep step of at least one fractional LSB per PD cycle |
+| `M` | 16 PD cycles | programmed ramp shortening (trigger margin) |
+| `D` | 22.5 PD cycles | trigger delay from the sample instant |
+| block | 1024 samples | samples per `CAPT:BLOC?` block |
+
+### 6.3 Sweep model
+
+The sweep is exact; the read-backs are the realised values.
+
+* Frequencies are Q24 multiples of `F_REF`: `Nq = round(f * 2^24 / F_REF)`.
+* `Nr = round(T * fs)` samples per ramp, at least 4; realised ramp time
+  `T' = Nr / fs`, so `Nr` is an integer.
+* `K = Nr * R` PD cycles per ramp; `step = round((N1q - N0q) / K)`, signed,
+  non-zero, `|step| < 2^23`.
+* `SWEEP:FREQSTAR?` = `N0q * F_REF / 2^24`, `SWEEP:FREQSTOP?` =
+  `(N0q + step * K) * F_REF / 2^24`; slope `(FREQSTOP - FREQSTAR) / T'`
+  exactly.
+* The programmed ramp is `K - M` PD cycles long, starts `M / 2` steps after
+  FREQSTAR and is triggered from the sample interrupt every `Nr` samples, so
+  the ideal triangle through the ramp lines has its apexes at FREQSTAR and
+  FREQSTOP and its turnarounds at `n0 + k * Nr` with
+  `n0 = (D - M / 2) / R = 14.5 / R` samples (0.018125 at R = 800).
+* `first_up` = 1 if FREQSTAR < FREQSTOP, else 0 (the first ramp sweeps
+  down).
+* Sawtooth (type 4): a ramp of `Nr` samples in the `first_up` direction,
+  a hop back to the start frequency and a rest of `Nd = round(dwell * fs)`
+  samples (at least 4); period `Nr + Nd`, ramps starting at
+  `n0 + j * (Nr + Nd)`.
+
+| `SWEEP:TYPE` | Host kind | Behaviour |
+|--------------|-----------|-----------|
+| 0 | `ramp` | one ramp per acquisition, triggered at its sample 0 |
+| 1 | `tri` | one triangle per acquisition, triggered at its sample 0 |
+| 2 | `triangle` | continuous triangle; acquisitions aligned to its period `2 Nr` |
+| 3 | `cw` | CW at FREQSTAR |
+| 4 | `saw` | continuous sawtooth (CV only); acquisitions aligned to its period `Nr + Nd` |
+
+### 6.4 Stock commands
+
+As §2–§3.7, with these differences:
+
+* Out-of-range parameters return 201 `"Out of range"` (the manual's code),
+  not -222. `SWEEP:RAMPTIME 0` and ramps under 4 samples are refused;
+  `SWEEP:START` with `step = 0` returns 201 and does not start.
+* `SWEEP:RAMPTIME` accepts decimal ms (up to 65536). Read-backs: frequencies
+  GHz with 9 decimals, ramp time ms with 6 decimals.
+* `SWEEP:TYPE` accepts 0–4.
+* `FREQ:REF:DIV` is accepted and read back but has no effect; the host never
+  sends it to CV firmware.
+* RF is off at power-up until `SWEEP:START` or `POWE:RF 1`.
+* `FREQ:LOCK?` and `SYST:TEMP?` return the values read just before the
+  sample clock started while it runs.
+* Not implemented: `*SAV`, `*RCL`, `*TRG`, `*OPT?`, `SYST:PRES`, `SYST:REST`,
+  `SYST:CLRM`, `CAPT:STRE?`.
+
+### 6.5 New commands
+
+| Command | Response / effect |
+|---------|-------------------|
+| `SWEEP:DWEL <ms>` / `SWEEP:DWEL?` | sawtooth rest; default 1 ms; `Nd >= 4` else 201; query realised ms, 6 decimals |
+| `SWEEP:ORIG?` | `<n0>,<first_up>`: commanded first turnaround in samples from acquisition sample 0 (`round(14.5e6 / R)` micro-samples, 6 decimals: `0.018125,1` at R = 800); CW `0.000000,1` |
+| `SWEEP:LIM?` | `<f_min GHz>,<f_max GHz>,<slope_min Hz/s>,<t_quantum ms>,<t_min ms>` with `t_quantum = 1 / fs`, `t_min = 4 / fs` |
+| `CAPT:RATE <Hz>` / `CAPT:RATE?` | `R = round(F_REF / Hz)` in 500 – 16383 else 201; query `F_REF / R`, 6 decimals; restarts a running sweep |
+| `CAPT:CONT <n>` | start an acquisition of `n` samples, 0 – 2147483647 (0: until `CAPT:ABOR`); read with `CAPT:BLOC?` only |
+| `CAPT:ABOR` | stop the acquisition and discard pending data |
+| `CAPT:BLOC?` | next block (§6.6); deferred while the acquisition runs and no block is complete; `#6000000` when nothing is pending |
+| `POWE:RF:TIME <s>` / `POWE:RF:TIME?` | RF auto-mute after `s` s without a host message while no acquisition runs; 0 disables; default 30; 0 – 3600 |
+
+The host reads `CAPT:RATE?`, `SWEEP:LIM?` and `SWEEP:ORIG?` but does not set
+the rate or the auto-mute; `qmrdk scpi` can.
+
+### 6.6 Block format
+
+IEEE 488.2 definite-length block with a fixed 6-digit length, then LF:
+
+```
+'#' '6' dddddd  payload[dddddd]  '\n'
+payload = u32 seq | u32 first | u16 count | u16 flags | count x u16 samples   (little-endian)
+```
+
+* `seq`: block number in the acquisition, from 0.
+* `first`: index of the block's first sample from acquisition sample 0.
+* `count`: 1024 except possibly in the last block.
+* `flags`: bit 0 OVERFLOW (samples were dropped immediately before this
+  block; `first` skips them), bit 1 END (last block of the acquisition).
+* Empty: `#6000000` + LF.
+
+Samples are the raw codes of §3.4.
+
+### 6.7 Acquisition alignment
+
+Sample 0 of an acquisition (`CAPT:FRAM` or `CAPT:CONT`) is the sample whose
+interrupt triggers a ramp in the `first_up` direction, for types 0, 1, 2
+and 4, so the turnarounds are at `n0 + k * Nr` (sawtooth ramp starts at
+`n0 + j * (Nr + Nd)`) in every acquisition:
+
+* types 2 and 4 running: the next sample on the sweep period grid; latency
+  at most one period, no restart transient;
+* types 0 and 1: after the VCO is re-parked at the start frequency and lock
+  polled;
+* CW or stopped: the first sample after the clock starts.
+
+### 6.8 Host capture procedure
+
+1. Send `CAPT:CONT <n>`, any `n >= 1` (no 4096 limit); the host time is
+   taken here.
+2. Read `CAPT:BLOC?` until `n` samples are collected. The first read's
+   timeout is the alignment latency (`2 T` triangle, `T + dwell` sawtooth,
+   the 50 ms lock wait for types 0 and 1, 0 for CW), plus the block time
+   `min(n, 1024) / fs`, plus a margin; later reads `1024 / fs` plus the
+   margin.
+3. Validate every block as `qmrdk.device.decode_block` does: a well-formed
+   header and length, `seq` and `first` continuing the previous block, no
+   OVERFLOW, `0 < count <= n - first`, and END exactly on the block that
+   completes `n`. An empty block before the end is an error.
+4. On any validation failure or timeout: `CAPT:ABOR`, drain `SYST:ERR?`,
+   discard the frame and retry.
+
+On every settings read the host refreshes `fs` from `CAPT:RATE?` (as
+`F_REF / round(F_REF / rate)`) and the limits from `SWEEP:LIM?`, and reads
+the timing with `SWEEP:ORIG?`.
+
+### 6.9 Session sequences
+
+Connect (`*IDN?` has already identified CV firmware):
+
+```
+CAPT:ABOR                  (stop a stream left running)
+CAPT:FRAM? until Not Ready
+SYST:ERR?                  -> drain
+*CLS
+CAPT:RATE? SWEEP:LIM? SWEEP:FREQSTAR? SWEEP:FREQSTOP? SWEEP:RAMPTIME? SWEEP:TYPE?
+SWEEP:DWEL? (sawtooth)  POWE:RF? FREQ:LOCK? SWEEP:ORIG?
+```
+
+Configure and capture (each setter followed by the error check of §3.7):
+
+```
+SWEEP:TYPE <t>
+SWEEP:FREQSTAR <f0>        (GHz, 9 decimals)
+SWEEP:FREQSTOP <f1>
+SWEEP:RAMPTIME <T>         (ms, 6 decimals)
+SWEEP:DWEL <d>             (sawtooth with a dwell given)
+SWEEP:START
+FREQ:LOCK?                 -> expect 1
+settings read (above)
+CAPT:CONT <n>  ...  CAPT:BLOC? until n samples
+```
+
+Disconnect is as §4.
+
+### 6.10 Recorded data
+
+The device timing travels with every recording made on CV firmware, so the
+processing need not estimate it: `qmrdk capture` and `qmrdk sar scan` store
+in `meta`'s `extra` the exact `fs` and `timing` = `{fs, n0, first_up}`
+(`SWEEP:ORIG?` with the rate); calibration frame files store `timing` next
+to `sweep`.
 
 ## Open questions
 

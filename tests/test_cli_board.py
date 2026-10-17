@@ -104,3 +104,55 @@ def test_capture_temperature(capsys, tmp_path):
     np.testing.assert_array_equal(rec.temperature, [31.25, 31.25])
     assert rec.t_host[1] - rec.t_host[0] >= 0.05
     assert run(capsys, *argv)[0] == 0 and Recording.load(out).temperature is None
+
+
+CV = "CV1.0.0"
+CV_TIMING = {"fs": 25_000.0, "n0": 0.018125, "first_up": True}
+
+
+def cv_source(served):
+    rng = np.random.default_rng(4)
+
+    def source(n, sweep, timing):
+        served.append((sweep, timing, rng.integers(0, 65536, n, dtype=np.uint16)))
+        return served[-1][2]
+
+    return source
+
+
+@pytest.mark.timeout(60)
+def test_capture_cv_records_timing(capsys, attach, tmp_path):
+    served = []
+    board = attach(SimBoard(firmware=CV, source=cv_source(served)))
+    board.inject("overflow")
+    out = tmp_path / "rec.npz"
+    argv = ["capture", "--frames", "2", "--n", "6000", "--out", str(out)]
+    argv += ["--type", "saw", "--ramp-time", "7.3", "--dwell", "2.51", "--f0", "2.3"]
+    code, stdout, _ = run(capsys, *argv)
+    assert code == 0 and "2 frames of 6000 samples" in stdout
+    rec = Recording.load(out)
+    np.testing.assert_array_equal(rec.codes, np.stack([s[2] for s in served[1:]]))
+    assert rec.sweep.kind == "saw" and rec.sweep.dwell == 2.52e-3
+    assert rec.sweep.ramp_time == 7.32e-3 and rec.sweep.f0 == 2.3e9
+    assert rec.extra["fs"] == 25_000.0 and rec.extra["timing"] == CV_TIMING
+    assert rec.extra["ref_div"] == 1 and not board.rf
+
+
+def test_saw_needs_cv(capsys, attach):
+    board = attach(SimBoard())
+    code, _, err = run(capsys, "set", "--type", "saw")
+    assert code == 2 and "need CV firmware" in err and not board.rf
+    code, _, err = run(capsys, "set", "--dwell", "1")
+    assert code == 2 and "sawtooth sweeps only" in err
+
+
+def test_info_and_limits_cv(capsys, attach):
+    attach(SimBoard(firmware=CV))
+    code, out, _ = run(capsys, "info")
+    info = json.loads(out)
+    assert code == 0 and info["timing"] == CV_TIMING and not info["rf"]
+    assert info["limits"]["f_min"] == 2.25e9
+    code, _, err = run(capsys, "set", "--f0", "2.2")
+    assert code == 2 and "outside 2.25..2.5 GHz" in err
+    code, out, _ = run(capsys, "set", "--f0", "2.25", "--ramp-time", "0.2")
+    assert code == 0 and json.loads(out)["sweep"]["ramp_time"] == 0.2e-3

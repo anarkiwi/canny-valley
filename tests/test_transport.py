@@ -212,3 +212,33 @@ def test_closed_session_is_disconnected():
     t.res.close()
     with pytest.raises(Disconnected, match="Invalid session"):
         t.query("*IDN?")
+
+
+@pytest.mark.parametrize(
+    "msg",
+    [
+        "SWEEP:DWEL 1",
+        "sweep:origin?",
+        "SWEEP:LIM?",
+        "CAPT:RATE 25000",
+        ":capture:continuous 0",
+        "CAPT:ABOR",
+        "CAPT:BLOC?",
+        "POWE:RF:TIME 30",
+    ],
+)
+def test_cv_only_commands(msg):
+    assert transport.forbidden(msg) == msg
+    assert transport.forbidden(msg, transport.CV_ONLY) is None
+    assert transport.forbidden(f"{msg};CAPT:STRE 1", transport.CV_ONLY) == "CAPT:STRE 1"
+
+
+def test_idn_cv():
+    assert Idn.parse("Quonset Microwave,QM4004,0042,CV1.0.0").cv
+    assert not Idn.parse("Quonset Microwave,QM4004,0042,V1.1.0").cv
+    t = Transport(manager=SimManager([SimBoard(firmware="CV1.0.0")]))
+    assert t.allowed_extra == transport.CV_ONLY
+    assert t.query("SWEEP:ORIG?") == "0.018125,1"
+    t.close()
+    with pytest.raises(Disconnected):
+        t.query_block("CAPT:BLOC?")

@@ -46,8 +46,9 @@ class Sled(Protocol):
 
 class UsbRadar:
     """The Radar protocol over a QM-RDK on USB (`qmrdk.device.Device`):
-    configures `sweep`, keeps the read-back values in `self.sweep`, and stops
-    the sweep on `close`."""
+    configures `sweep`, keeps the read-back values in `self.sweep` and, on CV
+    firmware, the device `Timing` of the sweep in `self.timing` (None on
+    stock firmware), and stops the sweep on `close`."""
 
     def __init__(
         self,
@@ -59,6 +60,7 @@ class UsbRadar:
         self.device = Device(resource, serial, manager)
         try:
             self.sweep = self.device.configure(sweep)
+            self.timing = self.device.timing()
         except BaseException:
             self.device.close()
             raise

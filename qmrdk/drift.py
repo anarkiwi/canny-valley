@@ -24,13 +24,16 @@ CHUNK = 256
 
 
 def line_values(codes, sweep, cal, window="hann", zpad=4):
-    """Complex range spectra `[K, 2, F]` of the mean up and down ramp of each
-    frame `codes[K, N]`, and the ramp length."""
+    """Complex range spectra `[K, S, F]` of the mean ramp of each set (up and
+    down, or the one sawtooth set) of frames `codes[K, N]`, and the ramp
+    length."""
     first_up = True if cal.first_up is None else cal.first_up
     parts = []
     for lo in tqdm(range(0, len(codes), CHUNK), desc="drift", unit="chunk"):
         x = codes_to_volts(np.asarray(codes[lo : lo + CHUNK]))
-        ramps = extract_ramps(x, cal.n0, cal.nr(sweep), cal.ng, first_up)
+        ramps = extract_ramps(
+            x, cal.n0, cal.nr(sweep), cal.ng, first_up, cal.period(sweep)
+        )
         if ramps.shape[-2] == 0:
             raise ValueError("frames hold no complete ramp of each direction")
         parts.append(range_spectrum(ramps.mean(axis=-2), window, zpad))
@@ -40,7 +43,7 @@ def line_values(codes, sweep, cal, window="hann", zpad=4):
 def select_bins(spec, nu, window="hann", count=1):
     """Line bins (the `count` strongest peaks beyond the zero-range main lobe,
     strongest first) and leakage bin (strongest inside it, DC excluded) of the
-    mean frame of `spec[K, 2, F]`."""
+    mean frame of `spec[K, S, F]`."""
     mag = np.abs(spec.mean(axis=0)).mean(axis=0)
     edge = int(np.ceil(window_lobes(window, nu)[0] * 2 * (spec.shape[-1] - 1) / nu))
     peaks = find_peaks(mag)[0]
@@ -50,7 +53,7 @@ def select_bins(spec, nu, window="hann", count=1):
 
 
 def unwrapped_phase(z):
-    """Phase (rad) of `z[K, 2]` relative to the first frame: each ramp
+    """Phase (rad) of `z[K, S]` relative to the first frame: each ramp
     direction unwrapped over frames, then averaged."""
     phi = np.unwrap(np.angle(z), axis=0)
     return (phi - phi[0]).mean(axis=1)
@@ -156,7 +159,7 @@ class DriftResult:
 
 
 def _line(z, k, r, f_c):
-    """Series of the line at bin `k` (range `r`) from its values `z[K, 2]`."""
+    """Series of the line at bin `k` (range `r`) from its values `z[K, S]`."""
     phi = unwrapped_phase(z)
     amp = np.abs(z).mean(axis=1)
     zbar = z.mean(axis=0)
@@ -220,9 +223,11 @@ def plot_drift(res: DriftResult, path) -> None:
 
 def run(args):
     """`qmrdk drift`: estimate, print and optionally save the report and plot."""
-    res = estimate_drift(
-        Recording.load(args.recording), Calibration.load(args.cal), count=args.lines
-    )
+    rec = Recording.load(args.recording)
+    cal = Calibration.load(args.cal)
+    if "timing" in rec.extra:
+        cal = cal.with_timing(**rec.extra["timing"])
+    res = estimate_drift(rec, cal, count=args.lines)
     text = json.dumps(res.summary(), indent=2)
     if args.report:
         pathlib.Path(args.report).write_text(text, encoding="utf-8")

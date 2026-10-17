@@ -166,3 +166,18 @@ def test_r_cal_shifts_axis():
     r1, l1 = range_profile(codes, SWEEP, dataclasses.replace(cal, r_cal=1.25))
     np.testing.assert_allclose(r0 - r1, 1.25)
     np.testing.assert_array_equal(l0, l1)
+
+
+@pytest.mark.parametrize("first_up", [True, False])
+@pytest.mark.parametrize("coherent", [True, False])
+def test_range_profile_sawtooth(first_up, coherent):
+    saw = Sweep(ramp_time=8e-3, kind="saw", dwell=1e-3)
+    cal = Calibration(fs=25_000.0, n0=0.4, ng=16, first_up=first_up, r_cal=0.3)
+    codes = ideal.to_codes(
+        ideal.if_signal(
+            N, saw, cal.fs, cal.n0, first_up, [ideal.range_tau(9.0, 0.3)], [1.0]
+        )
+    )
+    r, level = range_profile(codes, saw, cal, coherent)
+    assert _peak(level, r) == pytest.approx(9.0, abs=0.05)
+    assert level.max() == pytest.approx(20 * np.log10(1 / 2.5), abs=0.05)

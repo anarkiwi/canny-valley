@@ -10,7 +10,7 @@ import numpy as np
 
 from qmrdk.config import Calibration, ScanGeometry, Sweep
 from qmrdk.constants import ADC_MAX, FS_NOMINAL
-from qmrdk.device import SWEEP_TYPES, Device, DeviceError
+from qmrdk.device import CV_TYPES, Device, DeviceError
 from qmrdk.dsp.convert import codes_to_volts
 from qmrdk.dsp.sar import form_image
 from qmrdk.radar import HardwareSled, ManualSled, UsbRadar
@@ -115,7 +115,7 @@ def _image(args):
         print(f"{args.recording}: not a SAR scan (no x_pos)", file=sys.stderr)
         return 1
     _clipping(rec.codes, args.recording)
-    cal = Calibration() if args.cal is None else Calibration.load(args.cal)
+    cal = recorded_calibration(rec, args.cal)
     geometry = rec.geometry or ScanGeometry()
     scene = None if args.scene is None else _scene(args.scene)
     extent = _extent(args, scene, rec)
@@ -158,6 +158,14 @@ def _image(args):
     )
     print(f"{args.out}: first_up={img.first_up} sharpness={img.sharpness:.3g}")
     return 0
+
+
+def recorded_calibration(rec, path=None):
+    """Calibration at `path` (default constants if None) with the device
+    timing recorded with `rec` (CV firmware) applied."""
+    cal = Calibration() if path is None else Calibration.load(path)
+    timing = rec.extra.get("timing")
+    return cal if timing is None else cal.with_timing(**timing)
 
 
 def _background(args, default="none"):
@@ -266,12 +274,16 @@ def _list(args):
 
 def _settings(dev):
     s = dev.settings()
-    return {
+    out = {
         "sweep": dataclasses.asdict(s.sweep),
         "ref_div": s.ref_div,
         "rf": s.rf,
         "locked": s.locked,
     }
+    if s.timing is not None:
+        out |= {"timing": dataclasses.asdict(s.timing)}
+        out |= {"limits": dataclasses.asdict(dev.limits)}
+    return out
 
 
 def _info(args):
@@ -319,12 +331,15 @@ def _capture(args):
         codes, t_host, temp = dev.capture_many(
             args.n, args.frames, interval=args.interval, temperature=args.temperature
         )
+        settings = dev.settings()
         extra = {
             "idn": dataclasses.asdict(dev.idn),
             "resource": dev.transport.name,
-            "ref_div": dev.settings().ref_div,
-            "fs": FS_NOMINAL,
+            "ref_div": settings.ref_div,
+            "fs": FS_NOMINAL if settings.fs is None else settings.fs,
         }
+        if settings.timing is not None:
+            extra["timing"] = dataclasses.asdict(settings.timing)
     Recording(codes, sweep, t_host, extra=extra, temperature=temp).save(args.out)
     _clipping(codes, args.out)
     print(f"{args.out}: {codes.shape[0]} frames of {codes.shape[1]} samples")
@@ -338,10 +353,27 @@ def _hw_options(p, sweep=False):
     p.add_argument("--resource", help="VISA resource name")
     p.add_argument("--serial", help="board serial number")
     if sweep:
-        p.add_argument("--f0", type=float, default=2.4, help="sweep start, GHz")
-        p.add_argument("--f1", type=float, default=2.5, help="sweep stop, GHz")
-        p.add_argument("--ramp-time", type=float, default=8.0, help="ramp time, ms")
-        p.add_argument("--type", choices=list(SWEEP_TYPES), default="triangle")
+        span = "2.4-2.5 GHz (stock) or the board's limits (CV firmware: 2.25-2.5 GHz)"
+        p.add_argument("--f0", type=float, default=2.4, help=f"sweep start, {span}")
+        p.add_argument("--f1", type=float, default=2.5, help=f"sweep stop, {span}")
+        p.add_argument(
+            "--ramp-time",
+            type=float,
+            default=8.0,
+            help="ramp time, ms (stock: integer; CV firmware: any, at least 4 samples)",
+        )
+        p.add_argument(
+            "--type",
+            choices=list(CV_TYPES),
+            default="triangle",
+            help="sweep type (saw: CV firmware only)",
+        )
+        p.add_argument(
+            "--dwell",
+            type=float,
+            default=0.0,
+            help="saw: rest between ramps, ms (0 keeps the board's)",
+        )
 
 
 def _add_hardware(sub):
@@ -389,6 +421,7 @@ def _sweep(args):
         f1=args.f1 * 1e9,
         ramp_time=args.ramp_time * 1e-3,
         kind=getattr(args, "type", "triangle"),
+        dwell=getattr(args, "dwell", 0.0) * 1e-3,
     )
 
 

@@ -246,26 +246,37 @@ procedure measures, plus the analogue chain:
 | `noise` | additive white noise at the ADC, V rms | 2e-4 |
 | `dc` | ADC offset, V | 0.0 |
 | `oversample` | analogue simulation rate / `fs` | 8 |
+| `continuous` | the sweep has been running since before the frame: no restart, `t_reset` and `f_prev` unused, `t_start` any real | False |
 
 ### 4.2 Synthesis
 
 For a frame of `n` samples at `t_k = k / fs`:
 
-1. Simulation grid `t_m = m / (oversample · fs)` from `t_reset − 4 ms` to the
-   last sample.
+1. Simulation grid `t_m = m / (oversample · fs)` from `Hardware.t_first` to
+   the last sample: `t_reset − PREROLL` (`PREROLL` = 4 ms), or for a
+   continuous sweep `−max(PREROLL, t_settle)` with `t_settle` the time the
+   slowest IF pole takes to decay to `SETTLE` = 1e-6.
 2. Commanded frequency `f_cmd(t)`: `f_prev` before `t_reset`, the start
    frequency (`f0` if `first_up` else `f1`) until `t_start`, then the
-   triangle with turnarounds every `ramp_time`. CW: constant `f0`.
+   triangle with turnarounds every `ramp_time`. Sawtooth (kind `saw`): from
+   `t_start`, ramps of `ramp_time` from the start frequency in the
+   `first_up` direction, each followed by a hop back to the start frequency
+   and a rest of `dwell`. A continuous sweep has the same waveform extended
+   to all times before `t_start`. CW: constant `f0`.
 3. Synthesiser output `f_tx = H_pll * f_cmd` with
    `H_pll(s) = (2ζω s + ω²) / (s² + 2ζω s + ω²)`, started in steady state at
    `f_prev`. `f_cmd` is `f_prev` plus steps and slope changes at its
    breakpoints, so `f_tx = f_cmd − e` with the tracking error `e` the exact
-   sum, over breakpoints, of the closed-form step and ramp responses of
+   sum, over breakpoints (sawtooth: a slope change at each ramp start, a
+   jump and a slope change at each ramp end), of the closed-form step and
+   ramp responses of
    `1 − H_pll` (poles `−ζω ± ω sqrt(ζ² − 1)`). This equals the first-order-hold
    discretisation on any grid containing the breakpoints, but is exact at
    arbitrary times (`f_tx(sweep, hw, t)`), including breakpoints off the
    simulation grid, and is evaluated as a deviation from `f_cmd` that decays
-   to zero.
+   to zero. A continuous sweep sums the breakpoints from `PREROLL` before
+   the earliest time evaluated and tracks the command exactly before the
+   first of them.
 4. IF before filtering, summed over paths (plus the leakage path) with
    delay `tau_p + 2 r_cal / c`:
 
@@ -288,14 +299,16 @@ For a frame of `n` samples at `t_k = k / fs`:
 
 `Hardware` also exposes the derived truths the calibration tests compare
 against: `nr(sweep) = ramp_time * fs`, the commanded turnaround positions
-`turnarounds(sweep, n) = t_start * fs + k * nr` inside the frame, and
+`turnarounds(sweep, n) = t_start * fs + k * nr` inside the frame (sawtooth:
+the ramp starts, every `(ramp_time + dwell) * fs`; continuous: from the
+first at or after sample 0), and
 `if_group_delay(f)`, the exact group delay of the simulated (pre-warped
 bilinear) IF cascade. `calibration(sweep, f_ref=fs/4)` returns the ideal
 `Calibration`: `n0 = (t_start + if_group_delay(f_ref)) * fs`, i.e. the
 commanded first turnaround delayed by the IF group delay at the centre of
 the beat band (the type-2 PLL adds no delay: its ramps meet at the commanded
-corner); `r_cal`, `first_up` (None for CW) and the antenna offsets are the
-true values.
+corner), and `if_delay = if_group_delay(f_ref)`; `r_cal`, `first_up` (None
+for CW) and the antenna offsets are the true values.
 
 ## 5. Devices
 
@@ -309,3 +322,11 @@ true values.
   `true_position`) plus `hardware.tx_offset`/`rx_offset`, at `sweep.lam`
   with `hardware.antenna`, and synthesises one frame with the radar's
   random generator. Path computation is cached per true position.
+  `timing` (default None) is the device `Timing` it reports as CV firmware
+  would (`calib.sim_devices(..., timing=)`).
+* `qmrdk.sim.scpi.scene_source`: the default frame source of `SimBoard`
+  ([driver.md](driver.md)). With CV device timing `(fs, n0, first_up)` it
+  runs the board model at the device `fs` with `t_start = n0 / fs`,
+  `continuous` for types 2 and 4, and for types 0, 1 and 3 restarted at
+  `t_reset = 0` from the start frequency (`f_prev`), where the firmware
+  parks it.

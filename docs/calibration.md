@@ -15,6 +15,7 @@ with `--cal`.
 | `r_cal` | fixed delay as range | 3 |
 | `tx_offset`, `rx_offset` | antenna phase centres from the sled reference | 3 |
 | `sled_sigma` | sled position repeatability | 4 |
+| `if_delay` | IF phase delay at the reflector's beat frequency, s (CV firmware) | 1 (CV) |
 
 Every step runs against the simulated board with `--sim`, and the test
 suite checks that each estimator recovers the simulator's true values
@@ -319,6 +320,42 @@ Estimation (`qmrdk.calib.estimate_repeatability`):
 5. The report gives the standard error and the predicted peak-gain factor
    `exp(-(4 π sled_sigma / lam)²)`. SAR focusing needs `sled_sigma` well
    below `lam / 8`.
+
+## CV firmware
+
+With CV firmware (protocol §6) `fs`, the commanded first turnaround `n0_dev`
+and `first_up` are exact device constants reported by the board
+(`CAPT:RATE?`, `SWEEP:ORIG?`; `Device.timing()`). Step 1's estimation of
+`fs` and `n0` and step 3a are therefore not needed. The calibrated `n0` is
+the commanded turnaround delayed by the IF filter's phase delay at the
+reflector's beat frequency (step 1, item 4), so only that delay is measured,
+once, as `if_delay` (s). It is a property of the board's IF chain,
+independent of the ramp time and `fs` to first order.
+
+`qmrdk calib timing` on CV firmware (`qmrdk.calib.estimate_if_delay`):
+
+1. The static frames of step 1.
+2. `estimate_timing` with `fs` and `Nr = T fs` held at the device values
+   (`fix_fs`): item 5 fits `n0` alone, with `turnarounds - 1` degrees of
+   freedom.
+3. `if_delay = (n0_est - n0_dev) / fs`, the difference wrapped modulo `Nr`
+   into `[-Nr/2, Nr/2)`; standard error `se_n0 / fs`.
+
+`Calibration.with_timing(fs, n0, first_up)` takes `fs` and `first_up` from
+the device and sets `n0 = n0_dev + if_delay * fs`. The CLI applies it from
+the board, or from the `timing` stored with a recording or frame file
+(protocol §6.10), so step 1 is not repeated for each sweep setting.
+
+* Static frames are still captured: step 2 uses them, step 3 their noise
+  variance.
+* Step 3 keeps the device `first_up` and reports whether its estimate
+  agrees (`first_up_agrees`).
+* `qmrdk calib first-up` reports the device value without capturing.
+* `calibrate` does the same on any radar that reports a `timing`.
+
+The estimators that rest on triangle mirror symmetry (timing and
+`if_delay`, guard, first-up) refuse sawtooth sweeps: calibrate with a
+triangle sweep. `if_delay` applies unchanged to sawtooth recordings.
 
 ## Simulation
 

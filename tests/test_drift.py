@@ -162,3 +162,38 @@ def test_cli_simulated_board(attach, tmp_path, capsys):
     )
     assert s["target"]["temp_mm_per_degc"] == pytest.approx(1e3 * TC, rel=0.02)
     assert s["leakage"]["temp_mm_per_degc"] > 0
+
+
+def test_sawtooth_single_set():
+    """A sawtooth has one ramp set; the estimator averages over it alone."""
+    saw = Sweep(ramp_time=6e-3, kind="saw", dwell=1.5e-3)
+    cal = Calibration(n0=11.3, ng=16, first_up=False)
+    temperature = _temperature(np.arange(K))
+    tau = ideal.range_tau(np.add.outer(TC * temperature, [8.0, 0.4]))
+    x = ideal.if_signal(N, saw, cal.fs, cal.n0, False, tau, [0.3, 0.1], noise=2e-3)
+    rec = Recording(
+        ideal.to_codes(x), saw, np.arange(K, dtype=np.float64), temperature=temperature
+    )
+    res = estimate_drift(rec, cal)
+    assert res.lines["target"].phase.shape == (K,)
+    s = res.summary()["target"]
+    assert s["range_m"] == pytest.approx(8.0, abs=0.5)
+    assert abs(s["temp_mm_per_degc"] - 1e3 * TC) < 0.05 * 1e3 * TC
+
+
+@pytest.mark.timeout(300)
+def test_cli_cv_board_applies_recorded_timing(attach, tmp_path, capsys):
+    hw = Hardware(delay_tc=TC)
+    attach(SimBoard(firmware="CV1.0.0", hardware=hw, temperature=_temperature))
+    rec, cal = tmp_path / "static.npz", tmp_path / "cal.json"
+    hw.calibration(SWEEP).save(cal)
+    argv = ["capture", "--frames", "24", "--temperature", "--out", str(rec)]
+    assert cli.main(argv) == 0
+    assert Recording.load(rec).extra["timing"]["fs"] == 25_000.0
+    report = tmp_path / "drift.json"
+    assert (
+        cli.main(["drift", str(rec), "--cal", str(cal), "--report", str(report)]) == 0
+    )
+    capsys.readouterr()
+    s = json.loads(report.read_text(encoding="utf-8"))
+    assert s["target"]["temp_mm_per_degc"] == pytest.approx(1e3 * TC, rel=0.02)

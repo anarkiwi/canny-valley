@@ -8,7 +8,14 @@ from scipy import signal
 
 from qmrdk.config import Sweep
 from qmrdk.constants import C
-from qmrdk.sim.hardware import Hardware, f_cmd, f_tx, synthesize, synthesize_volts
+from qmrdk.sim.hardware import (
+    PREROLL,
+    Hardware,
+    f_cmd,
+    f_tx,
+    synthesize,
+    synthesize_volts,
+)
 from qmrdk.sim.propagation import Paths
 
 IDEAL = Hardware(pll_fn=1e9, hp_order=0, lp_order=0, r_cal=0.0, leak_amp=0.0, noise=0.0)
@@ -285,3 +292,92 @@ def test_noise_and_reproducibility():
     resid = volts(a) - synthesize_volts(paths, SWEEP, hw, n)
     assert np.std(resid) == pytest.approx(0.01, rel=5 / np.sqrt(2 * n))
     assert abs(np.mean(resid)) < 5 * 0.01 / np.sqrt(n)
+
+
+SAW = Sweep(ramp_time=6e-3, kind="saw", dwell=1.6e-3)
+
+
+@pytest.mark.parametrize("first_up", [True, False])
+def test_continuous_command_extends_before_frame(first_up):
+    hw = Hardware(t_start=-0.3e-3, continuous=True, first_up=first_up)
+    t = np.linspace(-20e-3, 40e-3, 6001)
+    k = np.arange(-4, 7)
+    lo, hi = (SWEEP.f0, SWEEP.f1) if first_up else (SWEEP.f1, SWEEP.f0)
+    ref = np.interp(t, hw.t_start + k * SWEEP.ramp_time, np.where(k % 2, hi, lo))
+    np.testing.assert_allclose(f_cmd(SWEEP, hw, t), ref, rtol=0, atol=1e-3)
+    np.testing.assert_allclose(
+        hw.turnarounds(SWEEP, 1000), hw.fs * (hw.t_start + np.arange(1, 3) * 16e-3)
+    )
+    cw = Sweep(kind="cw")
+    np.testing.assert_array_equal(f_tx(cw, hw, t), cw.f0)
+
+
+@pytest.mark.parametrize(("zeta", "first_up"), [(0.7, True), (1.0, False), (2.0, True)])
+def test_continuous_tracking_error_at_turnarounds(zeta, first_up):
+    """Every turnaround, those before the frame included, changes the slope by
+    2 mu; a frame starting mid-sweep has no restart transient."""
+    hw = Hardware(t_start=-1e-3, continuous=True, first_up=first_up, pll_zeta=zeta)
+    w = 2 * np.pi * hw.pll_fn
+    for k in (-1, 0, 2):
+        tk = hw.t_start + k * SWEEP.ramp_time
+        tau = np.linspace(0, SWEEP.ramp_time, 2001)[:-1]
+        up = (k % 2 == 0) == first_up
+        ref = f_cmd(SWEEP, hw, tk + tau) - (
+            (1 if up else -1) * 2 * SWEEP.slope * _ramp_error_closed(tau, zeta, w)
+        )
+        np.testing.assert_allclose(
+            f_tx(SWEEP, hw, np.r_[0.0, tk + tau])[1:], ref, rtol=0, atol=1e-5
+        )
+    t = np.linspace(0.0, 1e-3, 101)
+    np.testing.assert_allclose(f_tx(SWEEP, hw, t), f_cmd(SWEEP, hw, t), atol=1e-5)
+
+
+def test_saw_command_and_tracking():
+    hw = Hardware(t_start=0.2e-3, continuous=True, pll_zeta=0.7)
+    period = SAW.ramp_time + SAW.dwell
+    t = np.linspace(-10e-3, 30e-3, 8001)
+    u = np.mod(t - hw.t_start, period)
+    ref = SAW.f0 + np.where(u < SAW.ramp_time, SAW.slope * u, 0.0)
+    np.testing.assert_allclose(f_cmd(SAW, hw, t), ref, rtol=0, atol=1e-3)
+    w = 2 * np.pi * hw.pll_fn
+    end = hw.t_start + SAW.ramp_time
+    tau = np.linspace(0, SAW.dwell, 1001)[:-1]
+    jump = -SAW.bandwidth * _step_closed(tau, 0.7, w)
+    slope = SAW.slope * _ramp_error_closed(tau, 0.7, w)
+    np.testing.assert_allclose(
+        f_tx(SAW, hw, end + tau), SAW.f1 + jump + slope, rtol=0, atol=1e-4
+    )
+    np.testing.assert_allclose(
+        hw.turnarounds(SAW, 1000), hw.fs * (hw.t_start + np.arange(6) * period)
+    )
+    down = dataclasses.replace(
+        hw, first_up=False, continuous=False, t_reset=0.0, f_prev=SAW.f1
+    )
+    np.testing.assert_allclose(
+        f_cmd(SAW, down, [0.0, hw.t_start + 1e-3, hw.t_start + period - 1e-4]),
+        [SAW.f1, SAW.f1 - SAW.slope * 1e-3, SAW.f1],
+    )
+    np.testing.assert_allclose(
+        f_tx(SAW, down, [hw.t_start + 4e-3]),
+        [SAW.f1 - SAW.slope * 4e-3],
+        atol=1e-4,
+    )
+
+
+@pytest.mark.parametrize("sweep", [SWEEP, SAW])
+def test_continuous_frame_is_periodic_from_sample_zero(sweep):
+    hw = Hardware(fs=25_000.0, t_start=0.6e-6, continuous=True)
+    assert hw.t_first < -PREROLL
+    period = round(
+        (2 * sweep.ramp_time if sweep.kind != "saw" else sweep.ramp_time + sweep.dwell)
+        * hw.fs
+    )
+    v = synthesize_volts(
+        Paths.from_ranges([7.0, 23.0], [1e-4, 2e-4j]), sweep, hw, 3 * period
+    )
+    np.testing.assert_allclose(v[period:], v[:-period], atol=1e-5 * np.abs(v).max())
+    cal = hw.calibration(sweep)
+    assert cal.if_delay == pytest.approx(hw.if_group_delay(hw.fs / 4))
+    assert cal.n0 == pytest.approx(hw.fs * (hw.t_start + cal.if_delay))
+    assert Hardware(t_start=-1.0, continuous=True).t_start == -1.0
+    assert Hardware(hp_order=0, lp_order=0, continuous=True).t_first == -PREROLL

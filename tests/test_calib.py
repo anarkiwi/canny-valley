@@ -15,7 +15,7 @@ import pytest
 from scipy import signal, stats
 
 from qmrdk import calib
-from qmrdk.config import Calibration, ScanGeometry, Sweep
+from qmrdk.config import Calibration, ScanGeometry, Sweep, Timing
 from qmrdk.constants import FS_NOMINAL, C
 from qmrdk.dsp.range import range_spectrum
 from qmrdk.dsp.segment import interpolation_matrix, ramp_length
@@ -536,3 +536,126 @@ def test_cli_first_up_pair(board, tmp_path, capsys):
     argv[3] = str(tmp_path / "c.npz")
     assert run_cli(argv + ["--away"]) == 0
     assert read_report(rep)["first-up"]["first_up"] != Hardware().first_up
+
+
+CV_FS, CV_N0 = 25_000.0, 0.018125
+CV_SWEEP = Sweep(f1=2_499_945_068.0, ramp_time=8e-3)
+
+
+def cv_hardware(**truths):
+    """Board model behind CV firmware: exact fs, frames start on a ramp start
+    of a running sweep."""
+    return Hardware(fs=CV_FS, t_start=CV_N0 / CV_FS, continuous=True, **truths)
+
+
+@pytest.mark.parametrize(
+    "truths, rng",
+    [
+        ({"first_up": True}, 20.0),
+        ({"first_up": False}, 20.0),
+        ({"first_up": True, "hp_order": 0}, 8.0),
+        ({"first_up": False, "hp_order": 0}, 3.0),
+    ],
+)
+def test_if_delay_recovers_phase_delay(truths, rng):
+    hw = cv_hardware(leak_amp=0.0, **truths)
+    paths = Paths.from_ranges([rng], [1e-2 / rng**2])
+    gen = np.random.default_rng(0)
+    frames = np.stack([synthesize(paths, CV_SWEEP, hw, 4096, gen) for _ in range(16)])
+    device = Timing(CV_FS, CV_N0, hw.first_up)
+    res = calib.estimate_if_delay(frames, CV_SWEEP, device)
+    fb = CV_SWEEP.slope * 2.0 * (rng + hw.r_cal) / C
+    z, p, k = hw.if_zpk()
+    h = signal.freqz_zpk(z, p, k, worN=[fb], fs=hw.fsim)[1][0]
+    truth = -np.angle(h) / (2 * np.pi * fb)
+    bound = k_t(res.estimate.turnarounds - 1) * res.se_if_delay
+    assert abs(res.if_delay - truth) <= bound
+    assert res.estimate.fs == CV_FS and res.estimate.se_fs == 0.0
+    assert res.estimate.nr == pytest.approx(200.0)
+    cal = res.apply(Calibration(ng=3))
+    assert (cal.fs, cal.first_up, cal.ng) == (CV_FS, hw.first_up, 3)
+    assert cal.if_delay == res.if_delay
+    assert cal.n0 == pytest.approx(CV_N0 + res.if_delay * CV_FS)
+    assert res.noise_var == res.estimate.noise_var
+    json.dumps(res.summary())
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        calib.estimate_timing,
+        lambda f, s: calib.estimate_guard(f, s, Calibration()),
+        lambda f, s: calib.estimate_first_up(np.stack([f, f]), s),
+    ],
+)
+def test_mirror_steps_refuse_saw(step):
+    saw = Sweep(ramp_time=8e-3, kind="saw", dwell=1e-3)
+    with pytest.raises(ValueError, match="triangle mirror symmetry"):
+        step(np.zeros((2, 4096)), saw)
+
+
+def test_calibrate_cv_uses_device_timing():
+    """Steps 1-3 on a board with device timing: fs and first_up from the
+    device, step 1 measures only the IF delay."""
+    hw = cv_hardware()
+    device = Timing(CV_FS, CV_N0, hw.first_up)
+    radar, sled = calib.sim_devices(hw, CV_SWEEP, GEOM, TARGET, 1, timing=device)
+    cal, report = calib.calibrate(
+        radar, sled, GEOM, TARGET, 0.12, calib.nominal(hw), frames=8, repeats=1
+    )
+    t = report["timing"]
+    assert set(t) == {"if_delay", "se_if_delay", "device", "estimate"}
+    assert cal.fs == CV_FS and cal.first_up == hw.first_up
+    assert cal.if_delay == t["if_delay"]
+    assert cal.n0 == pytest.approx(CV_N0 + cal.if_delay * CV_FS)
+    assert report["reflector"]["first_up_agrees"]
+    assert report["reflector"]["focus"]["ok"]
+
+
+@pytest.fixture(name="cv_board")
+def fixture_cv_board(attach):
+    """CV board serving the scene's frames at the device timing."""
+    radar, sled = calib.sim_devices(cv_hardware(), CV_SWEEP, GEOM, TARGET, seed=5)
+    board = attach(
+        SimBoard(firmware="CV1.0.0", source=lambda n, sweep, timing: radar.capture(n))
+    )
+    board.sled = sled
+    return board
+
+
+def test_cli_cv_timing_and_first_up(cv_board, tmp_path):
+    a, rep, cal = (str(tmp_path / f) for f in ("a.npz", "rep.json", "cal.json"))
+    common = ["--frames", "4", "--report", rep, "--cal", cal]
+    assert run_cli(["calib", "timing", "--frames-file", a, *common]) == 0
+    res = read_report(rep)["timing"]
+    assert res["device"] == {"fs": CV_FS, "n0": CV_N0, "first_up": True}
+    stored = Calibration.load(cal)
+    assert stored.if_delay == res["if_delay"] and stored.fs == CV_FS
+    assert stored.n0 == pytest.approx(CV_N0 + stored.if_delay * CV_FS)
+    assert "CAPT:CONT 4096" in cv_board.log and not cv_board.rf
+    sent = cv_board.log.count("CAPT:CONT 4096")
+    assert run_cli(["calib", "first-up", *common]) == 0
+    assert read_report(rep)["first-up"]["first_up"] is True
+    assert cv_board.log.count("CAPT:CONT 4096") == sent
+    assert run_cli(["calib", "guard", "--frames-file", a, *common]) == 0
+    assert cv_board.log.count("CAPT:CONT 4096") == sent
+    assert Calibration.load(cal).fs == CV_FS
+    assert run_cli(["calib", "timing", "--frames-file", a, *common]) == 0
+    assert read_report(rep)["timing"]["if_delay"] == res["if_delay"]
+
+
+def test_cli_cv_reflector_from_recorded_scan(tmp_path):
+    """A recorded CV scan carries the device timing; the step keeps its first_up."""
+    hw = cv_hardware(hp_order=0)
+    device = Timing(CV_FS, CV_N0, hw.first_up)
+    radar, sled = calib.sim_devices(hw, CV_SWEEP, GEOM, TARGET, 2, timing=device)
+    scan_file, rep, cal = (str(tmp_path / f) for f in ("s.npz", "r.json", "c.json"))
+    calib.run_reflector(radar, sled, GEOM, TARGET).save(scan_file)
+    calib.nominal(hw).save(cal)
+    argv = ["calib", "reflector", "--frames-file", scan_file, "--cal", cal]
+    assert run_cli(argv + ["--report", rep]) == 0
+    res = read_report(rep)["reflector"]
+    assert res["first_up_agrees"] and res["first_up"] == hw.first_up
+    stored = Calibration.load(cal)
+    assert (stored.fs, stored.first_up) == (CV_FS, hw.first_up)
+    assert abs(stored.r_cal - hw.r_cal) < res["focus"]["predicted_widths"][0] / 16

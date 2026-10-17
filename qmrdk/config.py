@@ -13,14 +13,19 @@ from qmrdk.constants import C, FS_NOMINAL
 class Sweep:
     """Read-back sweep parameters of a capture.
 
-    `kind` is the sweep type (protocol §3.1): "ramp" (0), "tri" (1),
-    "triangle" (2, AUTO) or "cw" (3). `ramp_time` is the one-way ramp time.
+    Attributes:
+        kind: sweep type (protocol §3.1): "ramp" (0), "tri" (1), "triangle"
+            (2, AUTO), "cw" (3) or, with CV firmware only, "saw" (4).
+        ramp_time: one-way ramp time, s.
+        dwell: rest at the start frequency between sawtooth ramps, s (0 keeps
+            the board's setting).
     """
 
     f0: float = 2.4e9
     f1: float = 2.5e9
     ramp_time: float = 16e-3
     kind: str = "triangle"
+    dwell: float = 0.0
 
     @property
     def bandwidth(self):
@@ -44,9 +49,21 @@ class Sweep:
 
 
 @dataclasses.dataclass(frozen=True)
+class Timing:
+    """Device sweep timing reported by CV firmware (protocol §6): exact
+    sample rate `fs` (Hz), commanded first turnaround `n0` (samples from the
+    acquisition start) and the direction of the ramp starting there."""
+
+    fs: float
+    n0: float
+    first_up: bool
+
+
+@dataclasses.dataclass(frozen=True)
 class Calibration:
     """Board constants determined by the calibration procedure (docs/calibration.md).
 
+    Attributes:
     fs: ADC sample rate relative to the sweep clock, so that a ramp spans
         `ramp_time * fs` samples.
     n0: apparent sample position of the first turnaround of a frame (fractional),
@@ -58,6 +75,8 @@ class Calibration:
     tx_offset, rx_offset: antenna phase centres relative to the sled reference
         point (x along the rail, y towards the scene, z up), m.
     sled_sigma: measured sled position repeatability (1 sigma), m.
+    if_delay: IF filter phase delay at the reflector's beat frequency, s;
+        the apparent turnaround lags the commanded one by `if_delay * fs`.
     """
 
     fs: float = FS_NOMINAL
@@ -68,10 +87,25 @@ class Calibration:
     tx_offset: tuple[float, float, float] = (-0.05, 0.0, 0.0)
     rx_offset: tuple[float, float, float] = (0.05, 0.0, 0.0)
     sled_sigma: float = 0.0
+    if_delay: float = 0.0
 
     def nr(self, sweep: Sweep) -> float:
         """Samples per ramp."""
         return sweep.ramp_time * self.fs
+
+    def period(self, sweep: Sweep) -> float | None:
+        """Samples per sawtooth period; None for the triangle-like kinds."""
+        return (
+            (sweep.ramp_time + sweep.dwell) * self.fs if sweep.kind == "saw" else None
+        )
+
+    def with_timing(self, fs: float, n0: float, first_up: bool) -> "Calibration":
+        """Copy for the device timing of CV firmware (`Timing` fields): `fs`
+        and `first_up` from the device, `n0` the commanded turnaround delayed
+        by `if_delay`."""
+        return dataclasses.replace(
+            self, fs=fs, n0=n0 + self.if_delay * fs, first_up=bool(first_up)
+        )
 
     def to_json(self) -> str:
         return json.dumps(dataclasses.asdict(self), indent=2)

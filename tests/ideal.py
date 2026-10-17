@@ -17,10 +17,22 @@ def sweep_frequency(pos, sweep, fs, n0, first_up):
     )
 
 
+def saw_frequency(pos, sweep, fs, n0, first_up):
+    """Transmit frequency at fractional sample positions of a sawtooth whose
+    ramps start at `n0 + j (ramp_time + dwell) fs`, rising iff `first_up`."""
+    u = np.mod(
+        np.asarray(pos, dtype=np.float64) - n0, (sweep.ramp_time + sweep.dwell) * fs
+    )
+    rise = np.where(u < sweep.ramp_time * fs, sweep.slope * u / fs, 0.0)
+    return sweep.f0 + rise if first_up else sweep.f1 - rise
+
+
 def if_signal(n, sweep, fs, n0, first_up, tau, amp, theta=0.0, noise=0.0, rng=None):
     """IF volts `[..., n]`: sum over the last axis of `tau`, `amp`, `theta` of
-    `amp * cos(2 pi f_tx(t) tau + theta)` plus white noise of std `noise`."""
-    f = sweep_frequency(np.arange(n), sweep, fs, n0, first_up)
+    `amp * cos(2 pi f_tx(t) tau + theta)` plus white noise of std `noise`;
+    a sawtooth for `sweep.kind` "saw", else a triangle."""
+    freq = saw_frequency if sweep.kind == "saw" else sweep_frequency
+    f = freq(np.arange(n), sweep, fs, n0, first_up)
     tau, amp, theta = (
         np.asarray(v, dtype=np.float64)[..., None] for v in (tau, amp, theta)
     )

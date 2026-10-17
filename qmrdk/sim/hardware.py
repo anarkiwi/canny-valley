@@ -12,6 +12,7 @@ from qmrdk.constants import A_FS, ADC_MAX, C
 from qmrdk.sim.propagation import Antenna, Paths
 
 PREROLL = 4e-3
+SETTLE = 1e-6
 T_REF = 25.0
 
 
@@ -20,7 +21,8 @@ class Hardware:
     """True board parameters (docs/simulation.md §4.1).
 
     `f_prev` None means `sweep.f1`. `hp_order` or `lp_order` 0 removes that
-    filter.
+    filter. `continuous`: the sweep has been running since before the frame
+    (no reset, no `f_prev`); `t_start` is then any real.
     """
 
     fs: float = 21_977.0
@@ -47,9 +49,10 @@ class Hardware:
     noise: float = 2e-4
     dc: float = 0.0
     oversample: int = 8
+    continuous: bool = False
 
     def __post_init__(self):
-        if not 0.0 <= self.t_reset <= self.t_start:
+        if not self.continuous and not 0.0 <= self.t_reset <= self.t_start:
             raise ValueError("need 0 <= t_reset <= t_start")
         if self.pll_fn <= 0 or self.pll_zeta <= 0:
             raise ValueError("pll_fn and pll_zeta must be positive")
@@ -65,17 +68,31 @@ class Hardware:
         """Analogue simulation rate, Hz."""
         return self.oversample * self.fs
 
+    @property
+    def t_first(self):
+        """Start of the simulation grid, s: `PREROLL` before the restart or,
+        for a continuous sweep, also until the slowest IF pole has decayed to
+        `SETTLE` (the filters start in steady state for a constant input)."""
+        if not self.continuous:
+            return min(0.0, self.t_reset - PREROLL)
+        p = self.if_zpk()[1]
+        settle = np.log(SETTLE) / np.log(np.abs(p).max()) / self.fsim if p.size else 0
+        return -max(PREROLL, float(settle))
+
     def nr(self, sweep: Sweep) -> float:
         """Samples per ramp."""
         return sweep.ramp_time * self.fs
 
     def turnarounds(self, sweep: Sweep, n: int) -> np.ndarray:
-        """Commanded turnaround sample positions in a frame of `n` samples."""
+        """Commanded turnaround (sawtooth: ramp start) sample positions in a
+        frame of `n` samples."""
         if sweep.kind == "cw":
             return np.empty(0)
         n0 = self.t_start * self.fs
-        k = np.arange(max(0, int(np.ceil((n - n0) / self.nr(sweep)))))
-        return n0 + k * self.nr(sweep)
+        step = (sweep.ramp_time + sweep.dwell) * self.fs
+        step = step if sweep.kind == "saw" else self.nr(sweep)
+        k0 = int(np.ceil(-n0 / step)) if self.continuous else 0
+        return n0 + step * np.arange(k0, max(k0, int(np.ceil((n - n0) / step))))
 
     def if_zpk(self):
         """Digital zeros, poles and gain of the simulated IF cascade at `fsim`."""
@@ -107,9 +124,11 @@ class Hardware:
         in samples; `r_cal` is the true extra delay as range; CW has no
         ramp direction."""
         f_ref = 0.25 * self.fs if f_ref is None else f_ref
+        delay = float(self.if_group_delay(f_ref))
         return Calibration(
             fs=self.fs,
-            n0=float(self.fs * (self.t_start + self.if_group_delay(f_ref))),
+            n0=float(self.fs * (self.t_start + delay)),
+            if_delay=delay,
             first_up=None if sweep.kind == "cw" else self.first_up,
             r_cal=self.r_extra,
             tx_offset=tuple(self.tx_offset),
@@ -118,29 +137,71 @@ class Hardware:
 
 
 def f_cmd(sweep: Sweep, hw: Hardware, t) -> np.ndarray:
-    """Commanded synthesiser frequency at times `t` (s from frame start)."""
+    """Commanded synthesiser frequency at times `t` (s from frame start):
+    triangle with turnarounds every `ramp_time`, or sawtooth ("saw") ramps of
+    `ramp_time` from the start frequency, each followed by a hop back and a
+    rest of `dwell`."""
     t = np.asarray(t, dtype=np.float64)
     f_prev = sweep.f1 if hw.f_prev is None else hw.f_prev
     if sweep.kind == "cw":
+        if hw.continuous:
+            return np.full_like(t, sweep.f0)
         return np.where(t < hw.t_reset, f_prev, sweep.f0)
-    u = np.maximum(t - hw.t_start, 0.0) / sweep.ramp_time
-    tri = sweep.bandwidth * (1.0 - np.abs(1.0 - np.mod(u, 2.0)))
-    f = sweep.f0 + tri if hw.first_up else sweep.f1 - tri
-    return np.where(t < hw.t_reset, f_prev, f)
+    u = t - hw.t_start
+    u = u if hw.continuous else np.maximum(u, 0.0)
+    if sweep.kind == "saw":
+        ph = np.mod(u, sweep.ramp_time + sweep.dwell)
+        rise = sweep.slope * np.where(ph < sweep.ramp_time, ph, 0.0)
+    else:
+        u = u / sweep.ramp_time
+        rise = sweep.bandwidth * (1.0 - np.abs(1.0 - np.mod(u, 2.0)))
+    f = sweep.f0 + rise if hw.first_up else sweep.f1 - rise
+    return f if hw.continuous else np.where(t < hw.t_reset, f_prev, f)
 
 
-def _knots(sweep: Sweep, hw: Hardware, t_max: float):
-    """Breakpoints of the commanded frequency: times, jumps, slope changes."""
+def _knots(sweep: Sweep, hw: Hardware, t_min: float, t_max: float):
+    """Breakpoints of the commanded frequency: times, jumps, slope changes.
+    A continuous sweep has those from `PREROLL` before `t_min` on, and tracks
+    the command exactly before the first."""
     f_prev = sweep.f1 if hw.f_prev is None else hw.f_prev
     if sweep.kind == "cw":
+        if hw.continuous:
+            return np.empty(0), np.empty(0), np.empty(0)
         return np.array([hw.t_reset]), np.array([sweep.f0 - f_prev]), np.zeros(1)
     f_start = sweep.f0 if hw.first_up else sweep.f1
-    k = np.arange(max(0, int(np.floor((t_max - hw.t_start) / sweep.ramp_time)) + 1))
-    sign = (1.0 if hw.first_up else -1.0) * (-1.0) ** k
+    up = 1.0 if hw.first_up else -1.0
+    lo = t_min - PREROLL
+    if sweep.kind == "saw":
+        period = sweep.ramp_time + sweep.dwell
+        j0 = (
+            np.ceil((lo - hw.t_start - sweep.ramp_time) / period)
+            if hw.continuous
+            else 0
+        )
+        a = hw.t_start + period * np.arange(
+            j0, np.floor((t_max - hw.t_start) / period) + 1
+        )
+        times = np.concatenate([a, a + sweep.ramp_time])
+        jumps = np.concatenate(
+            [np.zeros(a.size), np.full(a.size, -up * sweep.bandwidth)]
+        )
+        dslope = up * sweep.slope * np.repeat([1.0, -1.0], a.size)
+    else:
+        k0 = int(np.ceil((lo - hw.t_start) / sweep.ramp_time)) if hw.continuous else 0
+        k = np.arange(
+            k0, max(k0, int(np.floor((t_max - hw.t_start) / sweep.ramp_time)) + 1)
+        )
+        times = hw.t_start + k * sweep.ramp_time
+        jumps = np.zeros(k.size)
+        sign = up * (-1.0) ** k
+        dslope = sign * sweep.slope * np.where((k == 0) & (not hw.continuous), 1.0, 2.0)
+    if hw.continuous:
+        keep = times >= lo
+        return times[keep], jumps[keep], dslope[keep]
     return (
-        np.concatenate([[hw.t_reset], hw.t_start + k * sweep.ramp_time]),
-        np.concatenate([[f_start - f_prev], np.zeros(k.size)]),
-        np.concatenate([[0.0], sign * sweep.slope * np.where(k == 0, 1.0, 2.0)]),
+        np.concatenate([[hw.t_reset], times]),
+        np.concatenate([[f_start - f_prev], jumps]),
+        np.concatenate([[0.0], dslope]),
     )
 
 
@@ -157,7 +218,7 @@ def f_tx(sweep: Sweep, hw: Hardware, t) -> np.ndarray:
     w = 2.0 * np.pi * hw.pll_fn
     beta = w * np.sqrt(complex(hw.pll_zeta**2 - 1.0))
     lam = -hw.pll_zeta * w + beta
-    for tk, jump, dslope in zip(*_knots(sweep, hw, float(t.max()))):
+    for tk, jump, dslope in zip(*_knots(sweep, hw, float(t.min()), float(t.max()))):
         tau = np.maximum(t - tk, 0.0)
         if beta == 0:
             ramp = tau * np.exp(lam * tau)
@@ -202,7 +263,7 @@ def _if_sum(paths: Paths, hw: Hardware, f, t) -> np.ndarray:
 
 def synthesize_volts(paths: Paths, sweep: Sweep, hw: Hardware, n: int) -> np.ndarray:
     """Noiseless filtered IF (V) at the sample instants k / fs, k < n."""
-    m0 = min(0, int(np.floor((hw.t_reset - PREROLL) * hw.fsim)))
+    m0 = int(np.floor(hw.t_first * hw.fsim))
     t = np.arange(m0, (n - 1) * hw.oversample + 1) / hw.fsim
     v = np.sqrt(hw.pt) * hw.gain * _if_sum(paths, hw, f_tx(sweep, hw, t), t)
     z, p, k = hw.if_zpk()

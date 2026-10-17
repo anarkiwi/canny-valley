@@ -132,3 +132,58 @@ def test_extract_ramps_short_frame_is_empty():
         0,
         ramp_length(NR, 0),
     )
+
+
+SAW = Sweep(ramp_time=6e-3, kind="saw", dwell=1.3e-3)
+SAW_NR = SAW.ramp_time * FS
+SAW_P = (SAW.ramp_time + SAW.dwell) * FS
+
+
+@pytest.mark.parametrize("first_up", [True, False])
+@pytest.mark.parametrize("n0", [-300.7, 0.018125, 55.5, 2 * SAW_P + 3.9])
+def test_saw_ramp_positions_index_increasing_frequency(n0, first_up):
+    ng = 5
+    pos = ramp_positions(n0, SAW_NR, ng, N, first_up, SAW_P)
+    nu = ramp_length(SAW_NR, ng)
+    assert pos.shape[0] == 1 and pos.shape[1] >= 4 and pos.shape[2] == nu
+    f = ideal.saw_frequency(pos, SAW, FS, n0, first_up)
+    m = np.arange(nu)
+    np.testing.assert_allclose(
+        f, np.broadcast_to(SAW.f0 + SAW.slope * (ng + m) / FS, f.shape), rtol=1e-12
+    )
+    np.testing.assert_allclose(np.diff(pos, axis=-1), 1.0 if first_up else -1.0)
+    assert pos.min() >= INTERP_HALF_WIDTH - 1 and pos.max() <= N - 1 - INTERP_HALF_WIDTH
+    start = pos[0, :, 0] - (ng if first_up else SAW_NR - ng)
+    j = (start - n0) / SAW_P
+    np.testing.assert_allclose(j, np.round(j), atol=1e-9)
+    assert np.all(np.diff(np.round(j)) == 1)
+    count = np.sum(
+        (n0 + SAW_P * np.arange(-50, 50) - INTERP_HALF_WIDTH + 1 + ng >= 0)
+        & (n0 + SAW_P * np.arange(-50, 50) + SAW_NR - ng + INTERP_HALF_WIDTH <= N)
+    )
+    assert pos.shape[1] == count
+
+
+@pytest.mark.parametrize("first_up", [True, False])
+def test_saw_extract_ramps_sample_sweep_frequency_grid(first_up):
+    ng, n0 = INTERP_HALF_WIDTH, 21.37
+    x = ideal.if_signal(N, SAW, FS, n0, first_up, TAU, AMP, THETA)
+    ramps = extract_ramps(np.stack([x, -x]), n0, SAW_NR, ng, first_up, SAW_P)
+    f = SAW.f0 + SAW.slope * (ng + np.arange(ramp_length(SAW_NR, ng))) / FS
+    expected = np.sum(
+        AMP[:, None] * np.cos(2 * np.pi * f * TAU[:, None] + THETA[:, None]), 0
+    )
+    assert ramps.shape[:2] == (2, 1) and ramps.shape[2] >= 4
+    tol = DESIGN_ERROR * AMP.sum()
+    np.testing.assert_allclose(
+        ramps[0], np.broadcast_to(expected, ramps.shape[1:]), atol=tol
+    )
+    np.testing.assert_allclose(ramps[1], -ramps[0], atol=1e-12)
+
+
+def test_saw_short_frame_is_empty():
+    assert extract_ramps(np.zeros(100), 0.0, SAW_NR, 0, True, SAW_P).shape == (
+        1,
+        0,
+        ramp_length(SAW_NR, 0),
+    )

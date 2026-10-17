@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from qmrdk.config import ScanGeometry, Sweep
+from qmrdk.config import ScanGeometry, Sweep, Timing
 from qmrdk.sim import propagation
 from qmrdk.sim.hardware import Hardware, synthesize
 
@@ -31,7 +31,8 @@ class SimSled:
 
 
 class SimRadar:
-    """Radar synthesising frames for the scene at the sled's true position."""
+    """Radar synthesising frames for the scene at the sled's true position;
+    `timing` is the device `Timing` it reports (CV firmware), None if none."""
 
     def __init__(
         self,
@@ -41,7 +42,9 @@ class SimRadar:
         sled,
         scan_geometry: ScanGeometry,
         seed=None,
+        timing: Timing | None = None,
     ):
+        self.timing = timing
         self.geometry = scene_geometry
         self.hardware = hardware
         self.sweep = sweep

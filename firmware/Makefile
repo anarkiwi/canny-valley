@@ -3,24 +3,28 @@ PORT ?=
 BUILD ?= build
 CXXFLAGS ?= -std=c++17 -O0 -g -Wall -Wextra -Werror --coverage
 SRC = sled/sled.ino sled/sled_core.h sled/test/test_core.cpp
+.DEFAULT_GOAL := all
+
+include radar/core.mk
+include radar/pic.mk
 
 .PHONY: all format test compile upload clean
 
 all: format test compile
 
 format:
-	clang-format --dry-run -Werror $(SRC)
+	clang-format --dry-run -Werror $(SRC) $(RADAR_FORMAT)
 
 $(BUILD)/test_core: sled/test/test_core.cpp sled/sled_core.h
 	mkdir -p $(BUILD)
 	rm -f $(BUILD)/*.gcda
 	$(CXX) $(CXXFLAGS) -DSLED_TRANSCRIPT='"$(CURDIR)/sled/test/protocol.txt"' -o $@ $<
 
-test: $(BUILD)/test_core
+test: $(BUILD)/test_core radar-test
 	$(BUILD)/test_core
 	gcovr -r . --filter sled/sled_core.h --fail-under-line 95 --fail-under-branch 85 $(BUILD)
 
-compile:
+compile: radar-compile
 	arduino-cli compile --fqbn $(FQBN) --warnings all --output-dir $(BUILD)/sled sled
 
 upload:
