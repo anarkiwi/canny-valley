@@ -30,12 +30,14 @@ def _layer(n, title, box=(174.9, -41.2, 175.2, -41.0), sets=("EPSG:3857",)):
         f"<Layer><ows:Title>{title}</ows:Title>"
         f"<ows:WGS84BoundingBox><ows:LowerCorner>{box[0]} {box[1]}</ows:LowerCorner>"
         f"<ows:UpperCorner>{box[2]} {box[3]}</ows:UpperCorner></ows:WGS84BoundingBox>"
-        f'{links}<ResourceURL format="image/png" resourceType="tile" template="{URL.format(n=n)}"/></Layer>'
+        f'{links}<ResourceURL format="image/png" resourceType="tile" '
+        f'template="{URL.format(n=n)}"/></Layer>'
     )
 
 
 CAPS = (
-    '<Capabilities xmlns="http://www.opengis.net/wmts/1.0" xmlns:ows="http://www.opengis.net/ows/1.1"><Contents>'
+    '<Capabilities xmlns="http://www.opengis.net/wmts/1.0" '
+    'xmlns:ows="http://www.opengis.net/ows/1.1"><Contents>'
     + _layer(1, "Town 0.075m Urban Aerial Photos (2025)")
     + _layer(2, "Town 0.10m Urban Aerial Photos (2017)")
     + _layer(3, "Region 0.3m Rural Aerial Photos (2016-17)")
@@ -95,12 +97,15 @@ def test_parse_layers():
         (0.3, 2017),
         (0.3, 2021),
     ]
-    order = [
-        lay.title[:20]
-        for lay in basemap.candidates(basemap.parse_layers(CAPS), LAT, LON)
+    order = basemap.candidates(basemap.parse_layers(CAPS), LAT, LON)
+    assert [(lay.gsd, lay.year) for lay in order] == [
+        (0.075, 2025),
+        (0.1, 2017),
+        (0.2, 2026),
+        (0.3, 2021),
+        (0.3, 2017),
     ]
-    assert order[0].startswith("Town 0.075") and order[-2:] == ["Region 0.3m Rura"] * 2
-    assert "Taupo" not in "".join(order)
+    assert not any(lay.title.startswith("Taupo") for lay in order)
 
 
 def test_tiles_match_slippy_map():
@@ -119,14 +124,8 @@ def test_tiles_match_slippy_map():
 @pytest.mark.parametrize("gsd", [0.075, 0.2, 1.0])
 def test_zoom_for(gsd):
     z = basemap.zoom_for(gsd, LAT)
-    pixel = (
-        lambda z: 2
-        * basemap.HALF_CIRCUMFERENCE
-        * math.cos(math.radians(LAT))
-        / 256
-        / 2**z
-    )  # noqa: E731
-    assert pixel(z) <= gsd < pixel(z - 1)
+    pixel = 2 * basemap.HALF_CIRCUMFERENCE * math.cos(math.radians(LAT)) / 256
+    assert pixel / 2**z <= gsd < pixel / 2 ** (z - 1)
 
 
 def test_find_photo_skips_empty_layers(server, tmp_path):
