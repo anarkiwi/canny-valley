@@ -227,4 +227,3 @@ connectors P1 and P2 capped.
 * The Bluetooth module (§4.7, RB2) is not needed for USB-only control and
   can be left unconfigured.
 * EEPROM slot stride (§4.4), from a dump of U1.
-* XJ1 even-pin order, XJ2 and XJ3 with a meter.
