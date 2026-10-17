@@ -329,8 +329,21 @@ and `first_up` are exact device constants reported by the board
 `fs` and `n0` and step 3a are therefore not needed. The calibrated `n0` is
 the commanded turnaround delayed by the IF filter's phase delay at the
 reflector's beat frequency (step 1, item 4), so only that delay is measured,
-once, as `if_delay` (s). It is a property of the board's IF chain,
-independent of the ramp time and `fs` to first order.
+once, as `if_delay` (s). It is a property of the board's IF chain and
+does not depend on `fs`, but it does depend on the beat frequency: the IF
+high-pass filter's phase delay falls through zero towards low beat
+frequencies. Measured on one board against a wall at about 9 m (2.4–2.5 GHz):
+
+| Ramp time | Beat frequency | `if_delay` |
+|-----------|----------------|------------|
+| 4 ms | 1.17–1.33 kHz | 17.7–18.7 µs |
+| 8 ms | 0.78 kHz | 16.2–16.9 µs |
+| 16 ms | 0.39 kHz | 1.1–2.0 µs |
+| 32 ms | 0.19 kHz | −65 to −69 µs |
+
+(ranges over 25 and 39.68 kHz sample rates). A single `if_delay` is
+therefore valid only near the beat frequency it was measured at: measure
+it with the imaging sweep settings and a reflector at the imaging range.
 
 `qmrdk calib timing` on CV firmware (`qmrdk.calib.estimate_if_delay`):
 
