@@ -14,7 +14,10 @@
 extern "C" {
 #endif
 
-#define RADAR_FIRMWARE "CV1.0.0"
+#ifndef RADAR_COMMIT
+#define RADAR_COMMIT "unknown"
+#endif
+#define RADAR_FIRMWARE "CV1.0.0-" RADAR_COMMIT
 
 /* Program the synthesiser (RF off), load the serial number and run the
    sample-clock self-test. */

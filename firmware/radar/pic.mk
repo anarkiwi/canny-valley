@@ -21,6 +21,16 @@ PIC_CFLAGS = -mcpu=$(RADAR_MCU) -std=gnu99 $(PIC_OPT) -fno-short-double \
 PIC_LDFLAGS = -mcpu=$(RADAR_MCU) -Wl,--script=p$(RADAR_MCU).gld,--heap=0 \
 	-Wl,--gc-sections,--report-mem,-Map=$(RADAR_OUT)/radar.map
 
+# Commit identifying the image in *IDN? and SYST:FIRM?; the stamp rebuilds
+# cmds.o whenever it changes.
+RADAR_COMMIT ?= unknown
+$(RADAR_OUT)/commit: FORCE
+	mkdir -p $(dir $@)
+	echo '$(RADAR_COMMIT)' | cmp -s - $@ || echo '$(RADAR_COMMIT)' > $@
+$(RADAR_OUT)/core/cmds.o: $(RADAR_OUT)/commit
+$(RADAR_OUT)/core/cmds.o: PIC_CFLAGS += -DRADAR_COMMIT='"$(RADAR_COMMIT)"'
+FORCE:
+
 # -O2 (available in the free edition) inlines the scheduler into the ISR.
 $(RADAR_OUT)/pic/hal.o: PIC_OPT = -O2
 

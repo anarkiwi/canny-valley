@@ -95,7 +95,7 @@ pk5 -M -F/out/radar.hex -Y          # erase, program all memory, verify
 `-M` programs program memory and the configuration words from the hex file
 (the image carries its own configuration words, same oscillator settings as
 stock) and `-Y` verifies. Unplug the PICkit, power-cycle the board and check
-`qmrdk list` shows firmware `CV1.0.0`, then run the bring-up checklist of
+`qmrdk list` shows firmware `CV1.0.0-<commit>` for the flashed build, then run the bring-up checklist of
 firmware.md.
 
 ## Restoring the stock firmware

@@ -381,7 +381,7 @@ hardware observation.
 ### 6.1 Detection
 
 The firmware field of `*IDN?` starts with `CV`:
-`Quonset Microwave,QM4004,<serial>,CV1.0.0`. The host selects its CV path
+`Quonset Microwave,QM4004,<serial>,CV1.0.0-<commit>`. The host selects its CV path
 from it (`Idn.cv`).
 
 ### 6.2 Constants

@@ -322,14 +322,14 @@ TEST_CASE_FIXTURE(Fixture, "power-up programming and identity") {
   CHECK(board.writes[3].data == REG07);
   CHECK(board.writes[4].data == (REG07 | REG07_TRAIN));
   CHECK(board.regs[0x0F] == REG0F_IDLE);
-  CHECK(q("*IDN?") == "Quonset Microwave,QM4004,0021,CV1.0.0");
+  CHECK(q("*IDN?") == "Quonset Microwave,QM4004,0021,CV1.0.0-0123456789ab");
   CHECK(err() == "0,\"No error\"");
   CHECK(q("SYST:STAT?") == "0,\"Operational\"");
   CHECK(q("SYST:TEMP?") == "25.00");
   CHECK(q("SYST:IDEN?") == "QM4004");
   CHECK(q("SYST:MODNUM?") == "QM4004");
   CHECK(q("SYST:SERNUM?") == "0021");
-  CHECK(q("SYST:FIRM?") == "CV1.0.0");
+  CHECK(q("SYST:FIRM?") == "CV1.0.0-0123456789ab");
   CHECK(q("SYST:VERS?") == "1999.0");
   CHECK(q("*TST?") == "0");
   CHECK(std::string(radar_serial()) == "0021");
@@ -346,7 +346,7 @@ TEST_CASE("serial number from the EEPROM") {
   board.eeprom[0x100] = 42;
   board.eeprom[0x101] = 0;
   radar_init();
-  CHECK(q("*IDN?") == "Quonset Microwave,QM4004,0042,CV1.0.0");
+  CHECK(q("*IDN?") == "Quonset Microwave,QM4004,0042,CV1.0.0-0123456789ab");
   board.eeprom[0x100] = 0x10;
   board.eeprom[0x101] = 0x27;
   radar_init();
@@ -671,7 +671,7 @@ TEST_CASE("sample-clock self-test") {
 TEST_CASE_FIXTURE(Fixture, "message framing and output handling") {
   radar_rx((const uint8_t *)"*ID", 3, false);
   radar_rx((const uint8_t *)"N?", 2, true);
-  CHECK(read() == "Quonset Microwave,QM4004,0021,CV1.0.0\n");
+  CHECK(read() == "Quonset Microwave,QM4004,0021,CV1.0.0-0123456789ab\n");
   send("SWEEP:TYPE?");
   CHECK(read() == "2\n");
   send("*IDN?\n");

@@ -5,7 +5,7 @@ Replacement program for the QM-RDK controller (U4, PIC24FJ256GB106,
 command the `qmrdk` host sends, so the host and the vendor-compatible paths
 work unchanged, and adds a sample clock locked to the synthesiser
 reference, deterministic sweep timing, binary streaming and the synthesiser
-corrections below. `*IDN?` reads `Quonset Microwave,QM4004,<serial>,CV1.0.0`;
+corrections below. `*IDN?` reads `Quonset Microwave,QM4004,<serial>,CV1.0.0-<commit>`, where `<commit>` is the first 12 hex digits of the commit the image was built from (`unknown` if the build was not given one; `-dirty` marks uncommitted changes);
 the host selects its CV path when the firmware field starts with `CV`
 ([driver.md](driver.md)).
 
@@ -200,8 +200,12 @@ as blocks or hex.
 
 ```
 docker build -f docker/firmware.Dockerfile -t qmrdk-firmware .
-docker run --rm -v "$PWD/firmware/build:/work/firmware/build" qmrdk-firmware make all
+docker run --rm -v "$PWD/firmware/build:/work/firmware/build" qmrdk-firmware \
+  make all RADAR_COMMIT=$(git describe --always --dirty --abbrev=12 --exclude '*')
 ```
+
+The image has no `.git`, so the commit is passed in as `RADAR_COMMIT`; CI
+passes the commit it builds.
 
 `make test` runs the core tests with coverage, `make compile` produces
 `firmware/build/radar/radar.hex` (XC16, free edition) together with the map
@@ -214,7 +218,7 @@ way ([programming.md](programming.md)).
 Everything above is verified only by the host tests of the core, the
 simulated board in `qmrdk.sim` and the XC16 build. On the board:
 
-1. Flash, power-cycle, `qmrdk list`: serial and `CV1.0.0`; `qmrdk info`: no
+1. Flash, power-cycle, `qmrdk list`: serial and `CV1.0.0-<commit>` matching the flashed build; `qmrdk info`: no
    -330 in the error queue (GPO clock self-test passed), RF off.
 2. Lock across the VCO range: CW at 2.25, 2.30, … 2.50 GHz, `FREQ:LOCK?` = 1
    at each; triangle sweeps over 2.25–2.5 GHz and 2.4–2.5 GHz at 1, 8 and
