@@ -234,3 +234,25 @@ def test_dominant_axis(bearing):
         (bearing + 90) % 360, abs=0.5
     )
     assert basemap.snap(bearing - 40 + 360, axis) == pytest.approx(bearing, abs=0.2)
+
+
+def test_image_photo(tmp_path):
+    path = tmp_path / "site.png"
+    Image.new("RGB", (300, 200), (10, 20, 30)).save(path)
+    rgba, extent = basemap.image_photo(path, (100.0, 50.0), 10.0)
+    assert rgba.shape == (200, 300, 4)
+    assert extent == pytest.approx((-10.0, 20.0, -15.0, 5.0))
+
+
+def test_overlay_cli_image(tmp_path, capsys):
+    path = tmp_path / "scan.npz"
+    scan()[1].save(path)
+    site = tmp_path / "site.png"
+    Image.new("RGB", (400, 400), (90, 120, 60)).save(site)
+    out = tmp_path / "o.png"
+    argv = ["sar", "overlay", str(path), "--out", str(out), "--bearing", "30"]
+    argv += ["--radius", "8", "--pixel", "0.2", "0.2", "--image", str(site)]
+    assert cli.main(argv) == 1 and "--image-origin" in capsys.readouterr().err
+    assert cli.main(argv + ["--image-origin", "200", "200", "--image-scale", "20"]) == 0
+    assert "bearing 30.0" in capsys.readouterr().out and out.is_file()
+    assert cli.main(argv[:-2]) == 1 and "--lat" in capsys.readouterr().err

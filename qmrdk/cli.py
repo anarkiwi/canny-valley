@@ -188,11 +188,32 @@ def recorded_calibration(rec, path=None):
     return cal if timing is None else cal.with_timing(**timing)
 
 
-def _overlay(args):
+def _overlay_photo(args, r):
+    """`(rgba, extent, attribution)` from --image, or the LINZ photo at
+    --lat/--lon; None (message printed) when neither can be had."""
+    if args.image is not None:
+        if args.image_origin is None or args.image_scale is None:
+            print("--image needs --image-origin and --image-scale", file=sys.stderr)
+            return None
+        rgba, extent = basemap.image_photo(
+            args.image, args.image_origin, args.image_scale
+        )
+        return rgba, extent, ""
     key = args.key or os.environ.get("LINZ_API_KEY")
-    if not key:
-        print("no LINZ Data Service key: --key or $LINZ_API_KEY", file=sys.stderr)
-        return 1
+    if not key or args.lat is None or args.lon is None:
+        print(
+            "LINZ photo needs --lat, --lon and --key or $LINZ_API_KEY", file=sys.stderr
+        )
+        return None
+    layers = basemap.parse_layers(basemap.capabilities(key, args.cache))
+    layer, zoom, rgba, extent = basemap.find_photo(
+        layers, args.lat, args.lon, r, args.zoom, args.cache
+    )
+    print(f"{layer.title} zoom {zoom}")
+    return rgba, extent, basemap.ATTRIBUTION.format(title=layer.title)
+
+
+def _overlay(args):
     rec = _scan_recording(args.recording)
     if rec is None:
         return 1
@@ -204,10 +225,10 @@ def _overlay(args):
     img = _form(args, rec, cal, (xc - r, xc + r, args.min_range, r))
     if img is None:
         return 1
-    layers = basemap.parse_layers(basemap.capabilities(key, args.cache))
-    layer, zoom, photo, extent = basemap.find_photo(
-        layers, args.lat, args.lon, r, args.zoom, args.cache
-    )
+    found = _overlay_photo(args, r)
+    if found is None:
+        return 1
+    photo, extent, attribution = found
     rcal = f"r_cal = {cal.r_cal:+.2f} m" if cal.r_cal else "uncalibrated range"
     bearing, how = args.bearing, ""
     if args.snap is not None:
@@ -226,10 +247,10 @@ def _overlay(args):
         dynamic_range=args.dynamic_range,
         alpha=args.alpha,
         flip=args.flip,
-        attribution=basemap.ATTRIBUTION.format(title=layer.title),
+        attribution=attribution,
         title=f"bearing {bearing:.1f}°{how}, {rcal}",
     )
-    print(f"{args.out}: {layer.title} zoom {zoom} bearing {bearing:.1f}{how}")
+    print(f"{args.out}: bearing {bearing:.1f}{how}")
     return 0
 
 
@@ -561,8 +582,17 @@ def parser():
     p.add_argument("recording")
     p.add_argument("--out", required=True, help="PNG")
     p.add_argument("--cal", help="calibration JSON")
-    p.add_argument("--lat", type=float, required=True, help="rail centre, degrees")
-    p.add_argument("--lon", type=float, required=True, help="rail centre, degrees")
+    p.add_argument("--lat", type=float, help="rail centre, degrees")
+    p.add_argument("--lon", type=float, help="rail centre, degrees")
+    p.add_argument("--image", help="north-up image to use instead of the LINZ photo")
+    p.add_argument(
+        "--image-origin",
+        type=float,
+        nargs=2,
+        metavar=("COL", "ROW"),
+        help="rail centre pixel in --image",
+    )
+    p.add_argument("--image-scale", type=float, help="--image pixels per metre")
     p.add_argument(
         "--bearing", type=float, required=True, help="boresight, degrees true"
     )
