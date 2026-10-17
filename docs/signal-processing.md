@@ -9,7 +9,7 @@ and MATLAB scripts. Acquisition is defined in [protocol.md](protocol.md).
 | Symbol | Meaning | Value / unit |
 |--------|---------|--------------|
 | `c` | speed of light | 299 792 458 m/s |
-| `fs` | ADC sample rate (measured; the vendor documents 20 000) | 21 977 Hz |
+| `fs` | ADC sample rate (measured; 16 MHz / 728 from the controller clock, not locked to the sweep reference; the vendor documents 20 000) | 21 977 Hz |
 | `N` | samples per capture | 1 – 4096 |
 | `f0`, `f1` | sweep start / stop frequency (read back from the device) | Hz |
 | `B` | swept bandwidth `f1 - f0` | Hz, ≤ 100e6 |
