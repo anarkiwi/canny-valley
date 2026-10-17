@@ -32,7 +32,7 @@ and this document updated before the device layer is written.
 | Vendor ID | `0x2012` | S |
 | Product ID | `0x0013` observed (H); `0x0017` in the vendor script (S). The host library matches any PID under the VID |
 | Product string | `QM4004` | H |
-| Serial string | Decimal serial number, zero-padded to 4 digits | S, H |
+| Serial string | Decimal serial number, zero-padded to 4 digits; V1.1.0 firmware never loads it from the EEPROM, so every board reports `0021` after power-up ([hardware.md](hardware.md) §4.4) | S, H |
 | VISA resource | `USB0::0x2012::<pid>::<serial %04d>::INSTR` | S, H |
 
 The device is a standard USBTMC instrument, so no vendor driver is needed.
