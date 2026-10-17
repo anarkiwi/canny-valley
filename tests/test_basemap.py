@@ -196,7 +196,12 @@ def test_overlay_cli(server, tmp_path, monkeypatch, capsys):
         "0.2",
     ]
     monkeypatch.delenv("LINZ_API_KEY", raising=False)
-    assert cli.main(argv) == 1 and "LINZ_API_KEY" in capsys.readouterr().err
+    missing = ["--key-file", str(tmp_path / "none")]
+    assert cli.main(argv + missing) == 1 and "LINZ_API_KEY" in capsys.readouterr().err
+    key_file = tmp_path / "key"
+    key_file.write_text(KEY + "\n", encoding="utf-8")
+    assert cli.main(argv + ["--key-file", str(key_file)]) == 0
+    assert any(KEY + "/" in u for u in server.urls)
     monkeypatch.setenv("LINZ_API_KEY", KEY)
     assert cli.main(argv + ["--cache", str(tmp_path / "c"), "--r-cal", "0.5"]) == 0
     assert "Region 0.2m" in capsys.readouterr().out and Image.open(out).size[0] > 0

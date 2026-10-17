@@ -370,6 +370,27 @@ The estimators that rest on triangle mirror symmetry (timing and
 `if_delay`, guard, first-up) refuse sawtooth sweeps: calibrate with a
 triangle sweep. `if_delay` applies unchanged to sawtooth recordings.
 
+## Rough `r_cal` from one target
+
+Without a reflector scan, `qmrdk calib target scan.npz --cal cal.json
+--distance D` (`calib.estimate_r_cal_target`) sets `r_cal` from any one
+strong target at a surveyed slant distance `D` from the antenna midpoint at
+mid-rail. It images the scan within `--width` of the rail centre and
+`--band` of `D` (the prior bound on `|r_cal|`), without the mean subtraction
+that removes a broadside target on a short rail, with the range profile
+zero-padded 32 times, and takes the strongest interior local maximum, so
+the close-in leakage skirt at the window edge is not mistaken for the
+target. `r_cal` moves by the peak's slant range minus `D`; nothing else in
+the calibration changes. It absorbs the IF delay's dependence on beat
+frequency at that range, so it holds best near `D`, and it leaves the
+antenna offsets at their defaults.
+
+`cal/field-rough.json` is such a calibration for CV firmware: a stool on the
+ground 5 m from the rail centre, scanned at 2.3–2.5 GHz with an 8 ms
+triangle over 0.88 m. `fs`, `n0` and `first_up` come from the recording's
+device timing when it is used; `if_delay`, `ng` and the offsets are
+defaults.
+
 ## Simulation
 
 `qmrdk.calib.calibrate_sim(hw, sweep)` (`qmrdk calib sim`) runs steps 1–4

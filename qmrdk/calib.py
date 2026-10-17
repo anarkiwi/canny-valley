@@ -21,7 +21,7 @@ from qmrdk.config import Calibration, ScanGeometry, Sweep, Timing
 from qmrdk.constants import C, FS_NOMINAL, SCAN_LENGTH
 from qmrdk.dsp.convert import as_volts
 from qmrdk.dsp.range import range_spectrum
-from qmrdk.dsp.sar import PhaseHistory, backproject, phase_history
+from qmrdk.dsp.sar import PhaseHistory, backproject, form_image, phase_history
 from qmrdk.dsp.segment import (
     INTERP_HALF_WIDTH,
     extract_ramps,
@@ -1350,6 +1350,77 @@ _ARGS = (
 )
 
 
+def estimate_r_cal_target(rec, cal, distance, z=None, width=1.0, band=2.5, pixel=0.01):
+    """`r_cal` placing the strongest return of scan `rec` within `width` m
+    either side of the rail centre at slant `distance` from the antenna
+    midpoint at mid-rail: one surveyed target, no reflector or offsets.
+
+    The target is the strongest local maximum inside the image (plane `z`,
+    default the rail height) `band` m either side of `distance`, the prior
+    bound on `|r_cal|`: the band and the interior-maximum rule keep close-in
+    leakage and its skirt out without subtracting the mean over positions
+    (that would remove a broadside target on a short rail). The range profile is
+    zero-padded 32 times so the linearly interpolated backprojection does
+    not pull the peak towards profile bins. Returns `(r_cal, report)`."""
+    geometry = rec.geometry or ScanGeometry()
+    z = geometry.height if z is None else z
+    timing = rec.extra.get("timing")
+    if timing is not None:
+        cal = cal.with_timing(**timing)
+    xc = 0.5 * (rec.x_pos.min() + rec.x_pos.max())
+    gx = xc + np.arange(-width, width + pixel / 2, pixel)
+    gy = np.arange(max(distance - band, pixel), distance + band + pixel / 2, pixel)
+    img = form_image(
+        rec.codes,
+        rec.x_pos,
+        rec.sweep,
+        cal,
+        geometry,
+        gx,
+        gy,
+        z,
+        background=None,
+        zpad=32,
+    )
+    a = np.abs(img.image)
+    peaks = a * (a == ndimage.maximum_filter(a, size=3, mode="constant"))
+    peaks[[0, -1], :] = peaks[:, [0, -1]] = 0.0
+    if not peaks.any():
+        raise ValueError(f"no return within {band} m of {distance} m")
+    iy, ix = divmod(int(np.argmax(peaks)), a.shape[1])
+    mid = 0.5 * sum(p[0] for p in geometry.antenna_positions([xc], cal))
+    slant = float(np.linalg.norm(np.array([gx[ix], gy[iy], z]) - mid))
+    r_cal = cal.r_cal + slant - distance
+    return r_cal, {
+        "peak": [float(gx[ix] - xc), float(gy[iy])],
+        "peak_db_over_median": float(20 * np.log10(a[iy, ix] / np.median(a))),
+        "slant": slant,
+        "distance": distance,
+        "r_cal": r_cal,
+    }
+
+
+def run_target(args):
+    """Handler of `calib target`: update `--cal` with the target's r_cal."""
+    path = pathlib.Path(args.cal)
+    cal = Calibration.load(path) if path.is_file() else Calibration()
+    try:
+        r_cal, report = estimate_r_cal_target(
+            Recording.load(args.recording),
+            cal,
+            args.distance,
+            args.z,
+            args.width,
+            args.band,
+        )
+    except ValueError as exc:
+        print(f"qmrdk calib: {exc}", file=sys.stderr)
+        return 2
+    dataclasses.replace(cal, r_cal=r_cal).save(path)
+    print(json.dumps(_floats(report), indent=2))
+    return 0
+
+
 def add_commands(subparsers):
     """Register the `calib` command group; every command sets `func=run_step`."""
     calib = subparsers.add_parser(
@@ -1367,4 +1438,20 @@ def add_commands(subparsers):
             help="reflector scans",
         )
         p.set_defaults(func=run_step)
+    p = sub.add_parser(
+        "target", help="rough r_cal from one target at a surveyed distance"
+    )
+    p.add_argument("recording", help="SAR scan .npz")
+    p.add_argument("--cal", required=True, help="calibration JSON to read and update")
+    p.add_argument(
+        "--distance", type=float, required=True, help="rail centre to target, m"
+    )
+    p.add_argument("--z", type=float, help="target height, m (default rail height)")
+    p.add_argument(
+        "--width", type=float, default=1.0, help="search half-width along the rail, m"
+    )
+    p.add_argument(
+        "--band", type=float, default=2.5, help="search +- this about --distance, m"
+    )
+    p.set_defaults(func=run_target)
     return calib

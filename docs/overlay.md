@@ -5,7 +5,7 @@ recording on a square `±radius` about the rail centre and draws it on a
 LINZ aerial photo of the site.
 
 ```
-export LINZ_API_KEY=...        # LINZ Data Service key (data.linz.govt.nz)
+echo KEY > untracked/linz_api_key   # LINZ Data Service key (data.linz.govt.nz), or $LINZ_API_KEY
 qmrdk sar overlay artifacts/scan.npz --lat LAT --lon LON --bearing DEG --out map.png
 ```
 
@@ -19,6 +19,7 @@ qmrdk sar overlay artifacts/scan.npz --lat LAT --lon LON --bearing DEG --out map
 | `--r-cal` | override the calibration's `r_cal` (m) |
 | `--radius` | map half-width and maximum imaged range, m |
 | `--zoom` | tile zoom; default the finest at or below the layer's GSD |
+| `--key`, `--key-file` | LINZ key; default `$LINZ_API_KEY`, else `untracked/linz_api_key` (gitignored) |
 | `--cache` | tile and capabilities cache (default `artifacts/basemap`) |
 
 ## Imagery
