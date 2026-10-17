@@ -125,7 +125,10 @@ as `id?` would re-home it. It reads for up to 2 s:
 * nothing: legacy protocol.
 
 Rail position 0 is `origin` metres from the controller's `x = 0`, 50 mm by
-default (`--origin`), so the whole scan stays clear of the switch. `home()`
+default (`--origin`), so the whole scan stays clear of the switch. The
+firmware soft limit is 950 mm from `x = 0`, so with the default origin the
+default scan length (`--length`, `SCAN_LENGTH` in `qmrdk/constants.py`,
+0.85 m) fits within the travel. `home()`
 moves to rail 0 without re-homing; `rehome()` runs the homing sequence.
 `position()` reports `steps · step − origin` (m), the step actually reached,
 not the requested `x`.

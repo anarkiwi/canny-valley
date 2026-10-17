@@ -8,7 +8,7 @@ Windows GUI and MATLAB scripts and adding rail SAR imaging.
 
 Simulated scan of the built-in `yard` scene (`qmrdk sar demo --scene yard`):
 the scene with its radar shadows and multipath ghosts (left) and the
-backprojected SAR image as the sled moves along the 1.5 m rail (right),
+backprojected SAR image as the sled moves along the 0.85 m rail (right),
 focusing from range rings to resolved targets as the aperture grows.
 
 Control and data are over USB only; the board's Bluetooth link is not used.
@@ -45,8 +45,8 @@ qmrdk capture --frames 1200 --interval 1 --temperature --out artifacts/static.np
 qmrdk drift artifacts/static.npz --cal cal.json --out artifacts/drift.png   # phase drift vs time and temperature
 qmrdk sar demo --scene yard --out artifacts/yard.png          # simulated scan, calibration, animated truth vs SAR
 qmrdk sar scan --sim --scene yard --out artifacts/scan.npz    # simulated scan recording
-qmrdk sar scan --length 1.5 --out artifacts/scan.npz          # board on USB, sled controller ($QMRDK_SLED or USB id)
-qmrdk sar scan --manual --length 1.5 --out artifacts/scan.npz # board on USB, radar moved by hand when prompted
+qmrdk sar scan --out artifacts/scan.npz                       # board on USB, sled controller ($QMRDK_SLED or USB id)
+qmrdk sar scan --manual --out artifacts/scan.npz              # board on USB, radar moved by hand when prompted
 qmrdk sar image artifacts/scan.npz --cal cal.json --scene yard --out artifacts/scan.png
 qmrdk sar image artifacts/scan2.npz --cal cal.json --reference artifacts/scan.npz --out artifacts/change.png  # change image
 qmrdk calib sim --cal cal.json                                # full calibration procedure on the simulated board
