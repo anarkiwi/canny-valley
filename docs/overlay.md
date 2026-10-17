@@ -13,6 +13,7 @@ qmrdk sar overlay artifacts/scan.npz --lat LAT --lon LON --bearing DEG --out map
 |--------|---------|
 | `--lat`, `--lon` | rail centre, WGS84 degrees |
 | `--bearing` | boresight (range axis), degrees true |
+| `--snap R` | move `--bearing` to the nearest wall axis of buildings within `R` m |
 | `--flip` | `+x` (away from home) is left of boresight; default right |
 | `--r-cal` | override the calibration's `r_cal` (m) |
 | `--radius` | map half-width and maximum imaged range, m |
@@ -41,6 +42,15 @@ grid `(x, y)` maps to the same plane by translating the rail centre to the
 origin and rotating so `+y` points along `--bearing`, with `+x` to its right
 (left with `--flip`). The image is colour-mapped in dB with opacity rising
 from zero at the dynamic-range floor.
+
+`--snap` finds the dominant pair of perpendicular edge directions in the
+photo (`dominant_axis`): the angle of the squared-gradient-weighted mean of
+`exp(4jθ)` over Gaussian-derivative gradient directions `θ`, which is
+invariant to 90° turns, so both walls of a rectilinear building vote for
+the same axis. The bearing moves to the nearest multiple of 90° from that
+axis; the coherence (0 to 1) reports how strongly the edges agree.
+
+The rail is drawn as a solid line and the boresight dotted.
 
 Without a calibrated `r_cal` the range axis includes the board's internal
 delay and returns plot beyond their true position; the title states which.

@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import ndimage
 from matplotlib import colormaps
 from matplotlib.cm import ScalarMappable
 from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -194,6 +195,27 @@ def find_photo(layers, lat, lon, half, zoom=None, cache=None, fetch=None, cover=
     raise LookupError(f"no aerial photos cover {lat}, {lon}")
 
 
+def dominant_axis(rgba, extent, radius, sigma=1.0):
+    """Bearing in `[0, 90)` degrees true of the dominant perpendicular pair of
+    edge directions (building walls) within `radius` of the origin, and its
+    coherence in `[0, 1]`: the angle of the squared-gradient-weighted mean of
+    `exp(4j theta)` over Gaussian-derivative gradient directions `theta`."""
+    g = rgba[..., :3].astype(float).mean(-1)
+    ge = ndimage.gaussian_filter(g, sigma, order=(0, 1))
+    gn = -ndimage.gaussian_filter(g, sigma, order=(1, 0))
+    h, w = g.shape
+    e = extent[0] + (np.arange(w) + 0.5) * (extent[1] - extent[0]) / w
+    n = extent[3] - (np.arange(h) + 0.5) * (extent[3] - extent[2]) / h
+    weight = (ge**2 + gn**2) * (np.hypot(*np.meshgrid(e, n)) <= radius)
+    z = np.sum(weight * np.exp(4j * np.arctan2(gn, ge)))
+    return (90.0 - np.degrees(np.angle(z)) / 4.0) % 90.0, abs(z) / weight.sum()
+
+
+def snap(bearing, axis):
+    """`bearing` moved to the nearest of `axis + k 90` degrees."""
+    return (axis + 90.0 * round((bearing - axis) / 90.0)) % 360.0
+
+
 def rail_transform(xc, bearing, flip=False):
     """Affine map from image `(x, y)` (rail, range) to east/north metres:
     rail centre `xc` at the origin, range along `bearing` (degrees true),
@@ -222,6 +244,7 @@ def save_overlay(
     img,
     xc,
     bearing,
+    rail=None,
     view=None,
     dynamic_range=40,
     alpha=0.8,
@@ -231,18 +254,23 @@ def save_overlay(
     dpi=150,
 ):
     """PNG of the SAR image on the aerial photo, in east/north metres, limited
-    to `view` `(e0, e1, n0, n1)` (default the photo)."""
+    to `view` `(e0, e1, n0, n1)` (default the photo), with the rail span
+    `rail` `(x0, x1)` drawn when given."""
     view = extent if view is None else view
     fig = Figure(figsize=(8.0, 8.0), dpi=dpi, layout="constrained")
     FigureCanvasAgg(fig)
     ax = fig.add_subplot()
     ax.imshow(photo, extent=extent, origin="upper", interpolation="lanczos")
+    to_map = rail_transform(xc, bearing, flip)
     ax.imshow(
         sar_rgba(img, dynamic_range, alpha),
         extent=_edges(img.gx, img.gy),
         origin="lower",
-        transform=rail_transform(xc, bearing, flip) + ax.transData,
+        transform=to_map + ax.transData,
     )
+    if rail is not None:
+        ax.plot(*to_map.transform([[rail[0], 0.0], [rail[1], 0.0]]).T, "c-", lw=2)
+    ax.plot(*to_map.transform([[xc, 0.0], [xc, 0.25 * (view[1] - view[0])]]).T, "c:")
     ax.plot(0.0, 0.0, "c^", ms=8, mec="k")
     fig.colorbar(
         ScalarMappable(Normalize(-dynamic_range, 0.0), CMAP),

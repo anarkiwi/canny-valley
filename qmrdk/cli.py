@@ -209,21 +209,27 @@ def _overlay(args):
         layers, args.lat, args.lon, r, args.zoom, args.cache
     )
     rcal = f"r_cal = {cal.r_cal:+.2f} m" if cal.r_cal else "uncalibrated range"
+    bearing, how = args.bearing, ""
+    if args.snap is not None:
+        axis, coherence = basemap.dominant_axis(photo, extent, args.snap)
+        bearing = basemap.snap(args.bearing, axis)
+        how = f" (snapped from {args.bearing:g}°, coherence {coherence:.2f})"
     basemap.save_overlay(
         args.out,
         photo,
         extent,
         img,
         xc,
-        args.bearing,
+        bearing,
+        rail=(rec.x_pos.min(), rec.x_pos.max()),
         view=(-r, r, -r, r),
         dynamic_range=args.dynamic_range,
         alpha=args.alpha,
         flip=args.flip,
         attribution=basemap.ATTRIBUTION.format(title=layer.title),
-        title=f"bearing {args.bearing:g}°, {rcal}",
+        title=f"bearing {bearing:.1f}°{how}, {rcal}",
     )
-    print(f"{args.out}: {layer.title} zoom {zoom}")
+    print(f"{args.out}: {layer.title} zoom {zoom} bearing {bearing:.1f}{how}")
     return 0
 
 
@@ -562,6 +568,12 @@ def parser():
     )
     p.add_argument(
         "--flip", action="store_true", help="+x (away from home) left of boresight"
+    )
+    p.add_argument(
+        "--snap",
+        type=float,
+        metavar="RADIUS",
+        help="snap --bearing to the nearest wall axis of buildings within RADIUS m",
     )
     p.add_argument("--r-cal", type=float, help="override the calibration r_cal, m")
     p.add_argument("--radius", type=float, default=25.0, help="map half-width, m")

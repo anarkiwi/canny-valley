@@ -6,7 +6,7 @@ import re
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 from sarscene import scan
 
 from qmrdk import basemap, cli
@@ -201,4 +201,36 @@ def test_overlay_cli(server, tmp_path, monkeypatch, capsys):
     assert cli.main(argv + ["--cache", str(tmp_path / "c"), "--r-cal", "0.5"]) == 0
     assert "Region 0.2m" in capsys.readouterr().out and Image.open(out).size[0] > 0
     assert any("layer=4," in u and KEY in u for u in server.urls)
+    assert cli.main(argv + ["--snap", "8"]) == 0
+    assert "snapped from 50" in capsys.readouterr().out
     assert cli.main(argv + ["--min-range", "9"]) == 1
+
+
+@pytest.mark.parametrize("bearing", [7.0, 30.0, 61.5])
+def test_dominant_axis(bearing):
+    """A rectangle with walls at `bearing` and `bearing + 90` degrees true,
+    and a disc that adds edges in every direction, drawn antialiased."""
+    size, extent = 1600, (-20.0, 20.0, -20.0, 20.0)
+    b = math.radians(bearing)
+    along, across = np.array([math.sin(b), math.cos(b)]), np.array(
+        [math.cos(b), -math.sin(b)]
+    )
+    corners = [
+        s * 8 * along + t * 5 * across for s, t in ((-1, -1), (1, -1), (1, 1), (-1, 1))
+    ]
+
+    def pixel(en):
+        return (en[0] + 20) * size / 40, (20 - en[1]) * size / 40
+
+    im = Image.new("RGBA", (size, size), (90, 120, 60, 255))
+    draw = ImageDraw.Draw(im)
+    draw.polygon([pixel(c) for c in corners], fill=(200, 200, 200, 255))
+    draw.ellipse([pixel((10, 18)), pixel((16, 12))], fill=(30, 30, 30, 255))
+    im = im.resize((size // 4, size // 4), Image.Resampling.BOX)
+    axis, coherence = basemap.dominant_axis(np.asarray(im), extent, 20.0)
+    assert abs((axis - bearing + 45) % 90 - 45) < 0.2
+    assert 0.2 < coherence <= 1
+    assert basemap.snap(bearing + 90 + 20, axis) == pytest.approx(
+        (bearing + 90) % 360, abs=0.5
+    )
+    assert basemap.snap(bearing - 40 + 360, axis) == pytest.approx(bearing, abs=0.2)
