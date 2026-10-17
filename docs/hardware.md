@@ -23,12 +23,12 @@ but unconfirmed.
 | U17 | Hittite HMC385LP4 (marking `H385`) | 2.25–2.5 GHz VCO |
 | U24 | Mini-Circuits SYM-25DMHW+ | receive mixer (40–2500 MHz, +13 dBm LO class) |
 | U16 | Linear Technology LTC6242 (marking `6242I`), 16-pin SSOP | quad op-amp forming the active IF filter between jumpers J6/J7 and J8/J9 |
-| U10 | Analog Devices 8-pin MSOP (brand code not decoded): 16-bit SAR ADC, CNV-pulse started, 16-clock read-out (AD7694-class) | IF digitiser; beside U12 (M) |
+| U10 | Analog Devices AD7694 (brand `C4x`; C4K = A grade, C4L = B grade), 16-bit 250 kSPS SAR, 8-lead MSOP | IF digitiser |
 | — | ADT7301-compatible temperature sensor (14-bit, 1/32 °C), location unknown | board temperature |
 | A1, A2, A3 | chip attenuators marked `2` | RF pads |
 | U14 | SOIC-8, unread | presumed loop-filter amplifier |
 | U11 | Linear Technology SOT-23-6 (marking `LTAHG`), with inductor L2 | presumed switching supply |
-| U12 | Linear Technology MSOP-8 (marking `LTDTF`) beside U10 | presumed ADC reference (5 V input span) |
+| U12 | Linear Technology MSOP-8 (marking `LTDTF`) beside U10 | presumed AD7694 reference (5 V input span) |
 | U8, U9 | SOIC-8, unread | U8 with volume trimmer R18: speaker amplifier, no connection to U4 |
 | U20, U21, U22, U23, U25, U26, U27 | unread | remaining RF chain: amplifiers, splitter, switch |
 
@@ -151,8 +151,10 @@ the actual frequency. No lock-detect pin is wired to U4.
 
 | Item | Value | Conf |
 |---|---|---|
-| Conversion | RD7 high for 2 µs (convert), then low; 16 SCK1 clocks read the result MSB first | H |
-| Word | 16 bits, unsigned, mid-scale at zero IF; all 16 bits are live in recorded frames | H |
+| Part | AD7694: pseudo-differential input, IN+ 0 V to VREF relative to IN− (ground sense), straight binary output; VREF up to VDD, 5 V here (5 V span) | H part, M VREF |
+| Conversion | rising edge of CNV (RD7) starts a conversion and tri-states SDO; falling edge of CNV puts the MSB on SDO; the other 15 bits follow on SCK falling edges (16 SCK1 clocks, no leading zeros) | H |
+| CNV high time | 2 µs on this board, below the AD7694's maximum tCONV of 3.2 µs (VDD 4.75–5.25 V; 4.66 µs below 4.75 V). A replacement program should hold CNV high for at least tCONV | H |
+| Word | 16 bits, unsigned, mid-scale at zero IF (IF biased to VREF/2); all 16 bits are live in recorded frames | H |
 | Sample period | instruction-timed from U4's 16 MHz clock: 2 µs convert, 16-bit read, 36 µs wait and loop overhead; measured 21 977 Hz = 16 MHz / 728 (45.5 µs) | H measured, M cycle count |
 | Frame | up to 4096 words held in U4 RAM | H |
 
@@ -217,8 +219,7 @@ connectors P1 and P2 capped.
 
 ## Open items for a replacement controller program
 
-* ADC part number (decode U10's brand code): conversion time and the
-  minimum CNV pulse width; 2 µs is known to work.
+* ADC reference voltage and U12's part number (measure VREF on U10 pin 1).
 * Temperature sensor location and part.
 * HMC703 register semantics are from the register layout and behaviour;
   check 06h, 07h, 08h, 0Bh and 0Fh against the HMC703 datasheet.
