@@ -21,6 +21,7 @@ from matplotlib.cm import ScalarMappable
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
+from matplotlib.path import Path
 from matplotlib.transforms import Affine2D
 from PIL import Image
 from tqdm import tqdm
@@ -34,6 +35,11 @@ ATTRIBUTION = "Aerial imagery: {title}, LINZ, CC BY 4.0"
 HALF_CIRCUMFERENCE = math.pi * 6378137.0
 _NS = {"w": "http://www.opengis.net/wmts/1.0", "ows": "http://www.opengis.net/ows/1.1"}
 _PHOTO = re.compile(r"([\d.]+)\s*m .*Aerial Photos.*\((\d{4})(?:-(\d{2,4}))?\)")
+
+
+_ARROW = Path(
+    [(0.0, 1.0), (0.45, -0.6), (0.0, -0.25), (-0.45, -0.6), (0.0, 1.0)], closed=True
+)
 
 
 @dataclass(frozen=True)
@@ -195,6 +201,15 @@ def find_photo(layers, lat, lon, half, zoom=None, cache=None, fetch=None, cover=
     raise LookupError(f"no aerial photos cover {lat}, {lon}")
 
 
+def image_photo(path, origin, scale):
+    """RGBA of a north-up image at `path` and its extent in east/north metres
+    from pixel `origin` `(column, row)` at `scale` pixels per metre."""
+    rgba = np.asarray(Image.open(path).convert("RGBA"))
+    h, w = rgba.shape[:2]
+    c, r = origin
+    return rgba, (-c / scale, (w - c) / scale, (r - h) / scale, r / scale)
+
+
 def dominant_axis(rgba, extent, radius, sigma=1.0):
     """Bearing in `[0, 90)` degrees true of the dominant perpendicular pair of
     edge directions (building walls) within `radius` of the origin, and its
@@ -271,7 +286,8 @@ def save_overlay(
     if rail is not None:
         ax.plot(*to_map.transform([[rail[0], 0.0], [rail[1], 0.0]]).T, "c-", lw=2)
     ax.plot(*to_map.transform([[xc, 0.0], [xc, 0.25 * (view[1] - view[0])]]).T, "c:")
-    ax.plot(0.0, 0.0, "c^", ms=8, mec="k")
+    ax.plot(0.0, 0.0, marker=_ARROW.transformed(Affine2D().rotate_deg(-bearing)),
+            color="c", ms=16, mec="k", ls="")  # fmt: skip
     fig.colorbar(
         ScalarMappable(Normalize(-dynamic_range, 0.0), CMAP),
         ax=ax,

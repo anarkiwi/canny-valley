@@ -15,6 +15,7 @@ qmrdk sar overlay artifacts/scan.npz --lat LAT --lon LON --bearing DEG --out map
 | `--bearing` | boresight (range axis), degrees true |
 | `--snap R` | move `--bearing` to the nearest wall axis of buildings within `R` m |
 | `--flip` | `+x` (away from home) is left of boresight; default right |
+| `--image`, `--image-origin COL ROW`, `--image-scale` | use a north-up image instead of the LINZ photo: rail-centre pixel and pixels per metre (no key needed) |
 | `--r-cal` | override the calibration's `r_cal` (m) |
 | `--radius` | map half-width and maximum imaged range, m |
 | `--zoom` | tile zoom; default the finest at or below the layer's GSD |
@@ -50,7 +51,8 @@ invariant to 90° turns, so both walls of a rectilinear building vote for
 the same axis. The bearing moves to the nearest multiple of 90° from that
 axis; the coherence (0 to 1) reports how strongly the edges agree.
 
-The rail is drawn as a solid line and the boresight dotted.
+The rail is drawn as a solid line, the boresight dotted, and the radar as an
+arrowhead pointing along the boresight.
 
 Without a calibrated `r_cal` the range axis includes the board's internal
 delay and returns plot beyond their true position; the title states which.
