@@ -49,7 +49,8 @@ qmrdk sar scan --out artifacts/scan.npz                       # board on USB, sl
 qmrdk sar scan --manual --out artifacts/scan.npz              # board on USB, radar moved by hand when prompted
 qmrdk sar image artifacts/scan.npz --cal cal.json --scene yard --out artifacts/scan.png
 qmrdk sar image artifacts/scan2.npz --cal cal.json --reference artifacts/scan.npz --out artifacts/change.png  # change image
-qmrdk sar overlay artifacts/scan.npz --lat LAT --lon LON --bearing DEG --out artifacts/map.png  # on a LINZ aerial photo ($LINZ_API_KEY)
+qmrdk sar overlay artifacts/scan.npz --lat LAT --lon LON --bearing DEG --out artifacts/map.png  # on a LINZ aerial photo (key in untracked/linz_api_key)
+qmrdk calib target artifacts/scan.npz --cal cal.json --distance 5.0   # rough r_cal from one surveyed target
 qmrdk calib sim --cal cal.json                                # full calibration procedure on the simulated board
 qmrdk calib {timing,guard,reflector,repeat} --sim --cal cal.json
 qmrdk calib timing --frames-file A.npz                        # on the board, first position

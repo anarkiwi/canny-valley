@@ -199,10 +199,18 @@ def _overlay_photo(args, r):
             args.image, args.image_origin, args.image_scale
         )
         return rgba, extent, ""
-    key = args.key or os.environ.get("LINZ_API_KEY")
+    key_file = pathlib.Path(args.key_file)
+    key = (
+        args.key
+        or os.environ.get("LINZ_API_KEY")
+        or (
+            key_file.read_text(encoding="utf-8").strip() if key_file.is_file() else None
+        )
+    )
     if not key or args.lat is None or args.lon is None:
         print(
-            "LINZ photo needs --lat, --lon and --key or $LINZ_API_KEY", file=sys.stderr
+            "LINZ photo needs --lat, --lon and --key, $LINZ_API_KEY or --key-file",
+            file=sys.stderr,
         )
         return None
     layers = basemap.parse_layers(basemap.capabilities(key, args.cache))
@@ -611,6 +619,11 @@ def parser():
     p.add_argument("--alpha", type=float, default=0.8, help="SAR opacity at peak")
     p.add_argument("--zoom", type=int, help="tile zoom (default from layer GSD)")
     p.add_argument("--key", help="LINZ Data Service API key (default $LINZ_API_KEY)")
+    p.add_argument(
+        "--key-file",
+        default="untracked/linz_api_key",
+        help="file holding the key, read when neither --key nor $LINZ_API_KEY is set",
+    )
     p.add_argument("--cache", default="artifacts/basemap", help="tile cache dir")
     _imaging_options(p, None, "hann")
     p.set_defaults(func=_overlay)
