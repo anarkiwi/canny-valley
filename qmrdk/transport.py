@@ -67,6 +67,9 @@ CV_ONLY = (
     "CAPT:ABOR",
     "CAPT:BLOC",
     "POWE:RF:TIME",
+    "SYST:REG",
+    "SYST:PIN",
+    "SYST:EDGE",
 )
 CV_PREFIX = "CV"
 BLOCK_HEAD = re.compile(rb"#6(\d{6})")

@@ -223,6 +223,8 @@ uint32_t hal_edges(uint16_t ms) {
   return n | (uint32_t)TMR3HLD << 16;
 }
 
+bool hal_gpo_level(void) { return PORTBbits.RB14; }
+
 uint16_t hal_temp_raw(void) {
   uint16_t v;
   TEMP_CS = 0;

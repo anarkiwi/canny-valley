@@ -188,6 +188,13 @@ def test_start_lock_and_types(res, board):
     assert board.boot == 1 and not board.rf
 
 
+def test_dark_sweeps_and_captures_with_rf_off(dev, board):
+    dev.dark = True
+    dev.configure(Sweep(ramp_time=8e-3))
+    assert dev.running and not board.rf and dev.transport.query("POWE:RF?") == "0"
+    assert dev.capture(3000).shape == (3000,) and not board.rf
+
+
 def read_block(res, timeout=10_000):
     res.timeout = timeout
     res.write("CAPT:BLOC?")

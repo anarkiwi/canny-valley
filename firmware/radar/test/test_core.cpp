@@ -29,7 +29,8 @@ struct Board {
   uint16_t temp = 800;
   uint8_t good_gpo = 9, spi2 = 0;
   Frame pending{};
-  bool rf = true, clock = false, eeprom_ok = true, polled = false;
+  bool rf = true, clock = false, eeprom_ok = true, polled = false,
+       gpo_level = false;
 
   static uint16_t code(uint32_t i) { return (uint16_t)(i * 7919u + 13u); }
 
@@ -226,6 +227,10 @@ uint32_t hal_edges(uint16_t ms) {
   REQUIRE(!B->clock);
   uint32_t sel = B->regs[0x0F] & 0x1F;
   return sel == B->good_gpo ? ms * B->per_ms() : ms * 20000u;
+}
+bool hal_gpo_level(void) {
+  REQUIRE(!B->clock);
+  return B->gpo_level;
 }
 uint16_t hal_temp_raw(void) {
   REQUIRE(!B->clock);
@@ -668,6 +673,30 @@ TEST_CASE("sample-clock self-test") {
   CHECK_FALSE(fail.clock);
   send("SWEEP:TYPE 3;:SWEEP:START\n");
   CHECK(err() == "0,\"No error\"");
+}
+
+TEST_CASE_FIXTURE(Fixture, "bring-up diagnostics while the clock is stopped") {
+  send("SYST:REG 15,193\n");
+  CHECK(board.regs[0x0F] == 193);
+  board.regs[0x05] = 0x654321;
+  CHECK(q("SYST:REG? 5") == std::to_string(0x654321));
+  board.gpo_level = true;
+  CHECK(q("SYST:PIN?") == "1");
+  CHECK(q("SYST:EDGE? 20") == std::to_string(20u * 20000u));
+  board.regs[0x0F] = 9;
+  CHECK(q("SYST:EDGE? 20") == "500");
+  for (const char *cmd : {"SYST:REG 64,0", "SYST:REG 1,16777216",
+                          "SYST:REG? 64", "SYST:EDGE? 0", "SYST:EDGE? 1001"}) {
+    send(std::string(cmd) + "\n");
+    CHECK_MESSAGE(err() == "201,\"Out of range\"", cmd);
+  }
+  send("SWEEP:START\n");
+  REQUIRE(board.clock);
+  for (const char *cmd :
+       {"SYST:REG 15,1", "SYST:REG? 18", "SYST:PIN?", "SYST:EDGE? 20"}) {
+    send(std::string(cmd) + "\n");
+    CHECK_MESSAGE(err() == "-221,\"Settings conflict\"", cmd);
+  }
 }
 
 TEST_CASE_FIXTURE(Fixture, "message framing and output handling") {

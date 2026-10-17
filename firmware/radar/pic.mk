@@ -21,6 +21,14 @@ PIC_CFLAGS = -mcpu=$(RADAR_MCU) -std=gnu99 $(PIC_OPT) -fno-short-double \
 PIC_LDFLAGS = -mcpu=$(RADAR_MCU) -Wl,--script=p$(RADAR_MCU).gld,--heap=0 \
 	-Wl,--gc-sections,--report-mem,-Map=$(RADAR_OUT)/radar.map
 
+# RADAR_DEBUG=1 builds for an in-circuit debugger (mdb with a PICkit 5):
+# debug info and the memory the debug executive reserves.
+ifeq ($(RADAR_DEBUG),1)
+PIC_CFLAGS += -g -D__DEBUG
+PIC_LDFLAGS += -Wl,--defsym=__MPLAB_BUILD=1,--defsym=__MPLAB_DEBUG=1 \
+	-Wl,--defsym=__DEBUG=1,--defsym=__MPLAB_DEBUGGER_PK5=1
+endif
+
 # Commit identifying the image in *IDN? and SYST:FIRM?; the stamp rebuilds
 # cmds.o whenever it changes.
 RADAR_COMMIT ?= unknown

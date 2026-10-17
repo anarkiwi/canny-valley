@@ -29,6 +29,8 @@ void hal_clock_start(void);
 void hal_clock_stop(void);
 /* Rising edges counted on RP14 (Timer2 external clock) over `ms`. */
 uint32_t hal_edges(uint16_t ms);
+/* Level of RP14 (HMC703 LD_SDO). */
+bool hal_gpo_level(void);
 
 /* SPI1 housekeeping (sample clock stopped only). */
 uint16_t hal_temp_raw(void);

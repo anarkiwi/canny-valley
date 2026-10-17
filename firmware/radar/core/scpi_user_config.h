@@ -25,6 +25,7 @@
 
 #define LIST_OF_USER_ERRORS                                                    \
   X(RADAR_ERR_RANGE, 201, "Out of range")                                      \
-  X(RADAR_ERR_CLOCK, -330, "Self-test failed")
+  X(RADAR_ERR_CLOCK, -330, "Self-test failed")                                 \
+  X(RADAR_ERR_CONFLICT, -221, "Settings conflict")
 
 #endif
