@@ -160,7 +160,10 @@ recording's `temperature`.
 `tools/bench.py` runs the antenna-free checks of firmware.md's bring-up
 checklist on a CV board with `Device.dark` set (identity, range errors, CW
 lock scan, sweeps, streams at 25 and 40 kHz, read-timeout recovery) and
-writes a JSON report to `artifacts/bench/`. `tools/flash.sh` builds the CV
+writes a JSON report to `artifacts/bench/`. `tools/rftest.py` runs the
+transmitting checks (antennas or a load fitted): IF level with RF off and
+on, range profile against the RF-off floor, IF spectrum lines of a CW at
+both sample rates, sweep periodicity and RF auto-mute; RF is off on exit. `tools/flash.sh` builds the CV
 firmware at the checked-out commit and programs it ([programming.md](programming.md)).
 
 ## Tests

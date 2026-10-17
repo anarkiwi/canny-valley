@@ -37,7 +37,9 @@ unpowered; with the board powered, J1 pins 1 and 2 both read 3.3 V.
   never sees a high voltage.
 * Plug the PICkit and the board into the same host, so they share a ground
   before the ICSP connection is made.
-* Antennas may be left off; terminate TX with 50 Ω if a load is at hand.
+* The stock firmware switches RF on at power-up: never power a board
+  running it without antennas or a 50 Ω load on TX. The CV firmware powers
+  up with RF off.
 * The read procedure is read only. Erase (`-E`), program (`-M`) and MPLAB X
   debug sessions write to flash; a debug session loads a debug executive.
   Keep the stock dump (`untracked/mplab/qmrdk-u4.hex`, below) before
@@ -120,7 +122,7 @@ pk5 -M -F/out/qmrdk-u4.hex -Y -OL
 
 programs the dump read in step 4 back, configuration words included;
 `*IDN?` then reports `V1.1.0` again. The stock firmware switches RF on at
-power-up.
+power-up, so the antennas or a load must be fitted first.
 
 ## XJ1
 

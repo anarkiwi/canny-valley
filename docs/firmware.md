@@ -24,6 +24,7 @@ selects its CV path when the firmware field starts with `CV`
 | `tools/isr_cycles.py` | best/worst-case cycle count of the sample ISR from `build/radar/isr.lst` |
 | `tools/flash.sh` | build at the checked-out commit and program with a PICkit 5 ([programming.md](programming.md)) |
 | `tools/bench.py` | antenna-free bench checks with RF muted, JSON report in `artifacts/bench/` |
+| `tools/rftest.py` | transmitting checks with antennas or a load: IF level, range profile, IF spurs, sweep periodicity, auto-mute |
 
 Interrupt priorities: sample clock (Timer2) 7, USB 4, millisecond tick
 lowest.
@@ -259,20 +260,23 @@ the same message (`Device.dark`), by `tools/bench.py`:
 * a block read that times out on the host, then `CAPT:ABOR` and `*IDN?`, for
   bTags below and above 128.
 
-With RF off the ADC input sits near 0 V (codes 0 to about 1000, the same with
-the stock-timed `SYST:ADC?`), so muted captures are not mid-scale.
+Verified with antennas, by `tools/rftest.py` and `qmrdk calib timing`:
 
-Remaining, with antennas or a 50 Ω load:
+* IF level: mid-scale with RF off and on; RF on adds the returns;
+* range profile: a static scene's reflectors stand 20–50 dB above the RF-off
+  floor;
+* sweep period: the stream's autocorrelation peaks at exactly 2 · Nr
+  samples, and `qmrdk calib timing` reports `locked`;
+* IF spurs: the 20 MHz on LD_SDO and its harmonics are multiples of fs and
+  alias to DC; a CW's IF spectrum shows the same low-frequency lines with RF
+  off as on, at both sample rates;
+* RF auto-mute: RF on, no host traffic for 35 s, `POWE:RF?` = 0;
+* `if_delay` from a single static set at the default 8 ms ramp.
 
-1. Spurs from the 20 MHz on LD_SDO: on a spectrum analyser (TX terminated)
-   and in the IF spectrum of captures, compare CW alone with CW during
-   `CAPT:CONT 0`; the datasheet warns that a toggling GPO can degrade
-   spectral performance.
-2. Sample rate against the audio tap: the sweep period must equal
-   2 · Nr / fs with fs = f_ref / R (`qmrdk calib timing` reports `locked`).
-3. n0 and direction: `qmrdk calib timing` on a static reflector gives the
-   apparent turnaround; it must equal `SWEEP:ORIG?` n0 plus the IF delay for
-   every ramp time and rate (constant `if_delay`), and step 3 must agree with
-   the reported first-ramp direction.
-4. RF auto-mute: RF on, no host traffic for 30 s, `POWE:RF?` = 0.
-5. IF level with RF on (mid-scale bias) and real returns.
+Remaining:
+
+1. The 20 MHz on LD_SDO in the transmitted spectrum, on a spectrum analyser
+   with TX terminated (the datasheet warns that a toggling GPO can degrade
+   spectral performance).
+2. `if_delay` constant across ramp times and sample rates, and step 3's
+   first-ramp direction against the reported one.

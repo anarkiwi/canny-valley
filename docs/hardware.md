@@ -170,7 +170,7 @@ from 2.25 GHz. (H)
 | Part | AD7694: pseudo-differential input, IN+ 0 V to VREF relative to IN− (ground sense), straight binary output; VREF up to VDD. Codes are ratiometric to VREF and nothing in the firmware or host software depends on its value; the 5 V span used for volts (`A_FS`) is the vendor scripts' nominal scale | H part, M scale |
 | Conversion | rising edge of CNV (RD7) starts a conversion and tri-states SDO; falling edge of CNV puts the MSB on SDO; the other 15 bits follow on SCK falling edges (16 SCK1 clocks, no leading zeros) | H |
 | CNV high time | 2 µs on this board, below the AD7694's maximum tCONV of 3.2 µs (VDD 4.75–5.25 V; 4.66 µs below 4.75 V). A replacement program should hold CNV high for at least tCONV | H |
-| Word | 16 bits, unsigned, mid-scale at zero IF (IF biased to VREF/2) with RF on; all 16 bits are live in recorded frames. With RF off (RB5 high) the input sits near 0 V: codes 0 to about 1000 with the CV firmware's read and with the stock read timing | H |
+| Word | 16 bits, unsigned, mid-scale at zero IF (IF biased to VREF/2), with RF on or off; all 16 bits are live in recorded frames. Codes near 0 with either firmware mean the ADC input is open: a jumper of J6, J7/J8 or J9 is missing or J7 and J8 disagree (user manual §2.6) | H |
 | Sample period | instruction-timed from U4's 16 MHz clock: 2 µs convert, 16-bit read, 36 µs wait and loop overhead; measured 21 977 Hz = 16 MHz / 728 (45.5 µs) | H measured, M cycle count |
 | Frame | up to 4096 words held in U4 RAM | H |
 
