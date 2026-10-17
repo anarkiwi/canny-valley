@@ -17,7 +17,7 @@ from qmrdk.config import Sweep
 from qmrdk.device import Device, LockError
 from qmrdk.transport import DeviceError, DeviceTimeout
 
-RATES = (800, 500)
+RATES = (25_000.0, 40_000.0)
 REJECT = ("SWEEP:FREQSTAR 2.2", "SWEEP:FREQSTOP 2.6", "SWEEP:RAMPTIME 0")
 SWEEPS = (
     Sweep(2.25e9, 2.5e9, 16e-3),
@@ -90,23 +90,23 @@ def periodicity(x: np.ndarray, period: int) -> dict:
     }
 
 
-def stream(dev: Device, rate: int, seconds: float) -> dict:
-    """Stream `seconds` of samples at f_ref/`rate` on a dark 16 ms triangle;
+def stream(dev: Device, rate: float, seconds: float) -> dict:
+    """Stream `seconds` of samples at `rate` Hz on a dark 16 ms triangle;
     host-clock sample rate, code statistics and sweep periodicity."""
     dev.scpi(f"CAPT:RATE {rate}")
     dev.settings()
-    dev.configure(Sweep(2.4e9, 2.5e9, 16e-3))
+    sweep = dev.configure(Sweep(2.4e9, 2.5e9, 16e-3))
     t = dev.timing()
     n = round(seconds * t.fs)
     t0 = time.monotonic()
     try:
         codes = dev.capture(n)
     except DeviceError as err:
-        return {"rate_div": rate, "fs": t.fs, "error": str(err)}
+        return {"rate_requested": rate, "fs": t.fs, "error": str(err)}
     elapsed = time.monotonic() - t0
     bits = np.bitwise_or.reduce(codes ^ codes[0])
     return {
-        "rate_div": rate,
+        "rate_requested": rate,
         "fs": t.fs,
         "samples": n,
         "host_rate": n / elapsed,
@@ -116,7 +116,7 @@ def stream(dev: Device, rate: int, seconds: float) -> dict:
         "code_min": int(codes.min()),
         "code_max": int(codes.max()),
         "toggling_bits": int(bits).bit_count(),
-        **periodicity(codes.astype(float), round(2 * 16e-3 * t.fs)),
+        **periodicity(codes.astype(float), round(2 * sweep.ramp_time * t.fs)),
     }
 
 

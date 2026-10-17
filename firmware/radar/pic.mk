@@ -66,7 +66,7 @@ $(RADAR_OUT)/radar.hex: $(RADAR_OUT)/radar.elf
 
 $(RADAR_OUT)/isr.lst: $(RADAR_OUT)/radar.elf
 	$(XC16)/xc16-objdump -d $< | \
-		awk '/^[0-9a-f]+ <[^.]/{p=/<__INT1Interrupt>:/} p' > $@
+		awk '/^[0-9a-f]+ <[^.]/{p=/<__T2Interrupt>:/} p' > $@
 	@test -s $@
 
 radar-compile: $(RADAR_OUT)/radar.hex $(RADAR_OUT)/isr.lst

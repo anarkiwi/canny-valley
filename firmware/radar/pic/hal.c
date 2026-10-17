@@ -1,5 +1,5 @@
 /* hal.h on the QM4004: SPI1 (EEPROM, temperature sensor, ADC), SPI2
-   (HMC703, HMC mode), the INT1 sample clock and the timers. FCY 16 MHz. */
+   (HMC703, HMC mode), the Timer2 sample clock and Timer1. FCY 16 MHz. */
 #include <xc.h>
 
 #include <libpic30.h>
@@ -33,7 +33,7 @@
 #define RP_SDI1 25u
 #define RP_GPO 14u
 
-/* SPI2 frame tail, owned by the sample ISR while INT1 is enabled: the last
+/* SPI2 frame tail, owned by the sample ISR while it is enabled: the last
    byte of a loaded write frame (TAIL_SEND | byte), or TAIL_DONE once it has
    been sent and SEN is still high. */
 #define TAIL_SEND 0x0100u
@@ -108,7 +108,6 @@ void board_init(void) {
   RPOR8bits.RP16R = PPS_SDO2;
   RPOR14bits.RP29R = PPS_SCK2OUT;
   RPINR22bits.SDI2R = RP_GPO;
-  RPINR0bits.INT1R = RP_GPO;
   RPINR3bits.T2CKR = RP_GPO;
   __builtin_write_OSCCONL(OSCCON | _OSCCON_IOLOCK_MASK);
 
@@ -118,8 +117,7 @@ void board_init(void) {
   SPI2CON2 = _SPI2CON2_SPIBEN_MASK;
   SPI2STAT = _SPI2STAT_SPIEN_MASK;
 
-  _INT1EP = 0;
-  _INT1IP = 7;
+  _T2IP = 7;
   _USB1IP = 4;
   T1CON = 0;
   TMR1 = 0;
@@ -150,13 +148,13 @@ void hal_synth_load(uint8_t reg, uint32_t data) {
   spi2_tail = TAIL_SEND | (uint8_t)f;
 }
 
-/* Sample clock edge. The CNV rising edge is the sample instant and the last
-   byte of a loaded frame follows it directly. */
-void __attribute__((interrupt, shadow, no_auto_psv)) _INT1Interrupt(void) {
+/* Sample clock period. The CNV rising edge is the sample instant and the
+   last byte of a loaded frame follows it directly. */
+void __attribute__((interrupt, shadow, no_auto_psv)) _T2Interrupt(void) {
   uint16_t t = spi2_tail;
   uint16_t w;
   uint8_t a;
-  _INT1IF = 0;
+  _T2IF = 0;
   CNV = 0;
   Nop();
   SPI1BUF = 0;
@@ -184,14 +182,20 @@ void __attribute__((interrupt, shadow, no_auto_psv)) _INT1Interrupt(void) {
   spi2_tail = t;
 }
 
-void hal_clock_start(void) {
+void hal_clock_start(uint16_t period) {
   spi1_config(SPI1_ADC);
-  _INT1IF = 0;
-  _INT1IE = 1;
+  T2CON = 0;
+  TMR2 = 0;
+  PR2 = period - 1u;
+  T2CON = _T2CON_TCS_MASK | 1u << _T2CON_TCKPS_POSITION;
+  _T2IF = 0;
+  _T2IE = 1;
+  T2CONbits.TON = 1;
 }
 
 void hal_clock_stop(void) {
-  _INT1IE = 0;
+  T2CONbits.TON = 0;
+  _T2IE = 0;
   if (spi2_tail & TAIL_SEND)
     SPI2BUF = spi2_tail;
   if (spi2_tail) {

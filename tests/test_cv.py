@@ -132,7 +132,7 @@ def test_power_up(res, board):
         ("SWEEP:TYPE 5", 201, "SWEEP:TYPE?", "2"),
         ("SWEEP:DWEL 0.1", 201, "SWEEP:DWEL?", "1.000000"),
         ("SWEEP:DWEL 2.51", None, "SWEEP:DWEL?", "2.520000"),
-        ("CAPT:RATE 40000", None, "SWEEP:ORIG?", "0.029000,1"),
+        ("CAPT:RATE 40000", None, "SWEEP:ORIG?", "0.028770,1"),
         ("CAPT:RATE 50000", 201, "CAPT:RATE?", "25000.000000"),
         ("CAPT:RATE 1000", 201, "CAPT:RATE?", "25000.000000"),
         ("POWE:RF:TIME 0", None, "POWE:RF:TIME?", "0"),
@@ -150,11 +150,14 @@ def test_settings(res, cmd, code, query, value):
 
 
 def test_rate_limits(res):
+    errs(res)
     res.write("CAPT:RATE 40000")
-    assert res.query("CAPT:RATE?") == "40000.000000"
-    assert res.query("SWEEP:LIM?").endswith(",0.025000,0.100000")
-    res.write("CAPT:RATE 1220.78")
-    assert res.query("CAPT:RATE?") == f"{F_REF / 16383:.6f}"
+    assert res.query("CAPT:RATE?") == f"{F_REF / 504:.6f}"
+    assert res.query("SWEEP:LIM?").endswith(",0.025200,0.100800")
+    res.write("CAPT:RATE 1222")
+    assert res.query("CAPT:RATE?") == f"{F_REF / 16368:.6f}"
+    res.write("CAPT:RATE 1221")
+    assert errs(res) == [201]
 
 
 @pytest.mark.parametrize(
@@ -470,7 +473,7 @@ def test_capture_gives_up_with_rf_off(running, board):
 
 
 def test_capture_after_disconnect(running, board):
-    board.message("CAPT:RATE 40000", 1.0)
+    board.message("CAPT:RATE 20000", 1.0)
     sweep = running.configure(Sweep(ramp_time=8e-3, kind="saw", dwell=2e-3))
     board.inject("disconnect")
     np.testing.assert_array_equal(running.capture(64), board.source.served[-1][2])

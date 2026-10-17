@@ -264,10 +264,12 @@ static scpi_result_t rate(scpi_t *c) {
   double hz;
   if (!SCPI_ParamDouble(c, &hz, TRUE))
     return SCPI_RES_ERR;
-  if (!(hz >= (double)SYNTH_FREF / (SYNTH_R_MAX + 0.5) &&
-        hz <= (double)SYNTH_FREF / (SYNTH_R_MIN - 0.5)))
+  if (!(hz >= (double)SYNTH_FREF / (SYNTH_R_MAX + SYNTH_R_STEP / 2.0) &&
+        hz <= (double)SYNTH_FREF / (SYNTH_R_MIN - SYNTH_R_STEP / 2.0)))
     return range_error(c);
-  core_set_rate((uint16_t)((double)SYNTH_FREF / hz + 0.5));
+  core_set_rate(
+      (uint16_t)(SYNTH_R_STEP *
+                 (uint16_t)((double)SYNTH_FREF / SYNTH_R_STEP / hz + 0.5)));
   return SCPI_RES_OK;
 }
 

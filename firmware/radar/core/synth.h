@@ -11,9 +11,13 @@ extern "C" {
 #endif
 
 #define SYNTH_FREF 20000000L
-#define SYNTH_R_MIN 500u
-#define SYNTH_R_MAX 16383u
+/* Sample period R in reference cycles: Timer2 counts the reference (GPO
+   select 8) through its 1:8 prescaler, so R is a multiple of 8. */
+#define SYNTH_R_STEP 8u
+#define SYNTH_R_MIN 504u
+#define SYNTH_R_MAX 16376u
 #define SYNTH_R_DEF 800u
+#define SYNTH_GPO_XTAL 8u
 #define SYNTH_MARGIN 16u
 /* TCY (FCY 16 MHz = 1.25 PD cycles) from the CNV rising edge to the 32nd
    SCK2 edge of the trigger frame in the sample ISR. */
@@ -27,7 +31,7 @@ extern "C" {
 enum { SD_FRAC = 0, SD_ONEWAY = 5, SD_TWOWAY = 6 };
 enum { TYPE_RAMP = 0, TYPE_TRI = 1, TYPE_AUTO = 2, TYPE_CW = 3, TYPE_SAW = 4 };
 
-#define REG06_BASE 0x201D1FUL
+#define REG06_BASE 0x001D1FUL
 #define REG07_TRAIN 0x100000UL
 #define REG07 0x204865UL
 #define REG08 0x016FFFUL

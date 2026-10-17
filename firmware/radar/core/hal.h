@@ -23,9 +23,10 @@ uint32_t hal_synth_read(uint8_t reg);
    after that. Sample clock stopped only. */
 void hal_synth_load(uint8_t reg, uint32_t data);
 
-/* Sample clock: INT1 on RP14 (the HMC703 GPO), one ADC conversion per edge.
-   Start clears any stale edge; stop leaves SEN low and SPI2 idle. */
-void hal_clock_start(void);
+/* Sample clock: Timer2 counts the reference on RP14 (the HMC703 GPO)
+   through its 1:8 prescaler, one ADC conversion each `period` counts.
+   Stop leaves SEN low and SPI2 idle. */
+void hal_clock_start(uint16_t period);
 void hal_clock_stop(void);
 /* Rising edges counted on RP14 (Timer2 external clock) over `ms`, through
    the Timer2 prescaler 1:1, 1:8, 1:64 or 1:256 (`ps` 0-3): the raw count. */
