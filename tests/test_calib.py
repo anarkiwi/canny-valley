@@ -45,7 +45,10 @@ UP = {
 }
 P = 1e-3
 CHI2_3 = stats.chi2.ppf(1 - P, 3)
-TARGET = calib.default_target(GEOM)
+LENGTH = 1.5
+RAMP = ["--ramp-time", f"{SWEEP.ramp_time * 1e3:g}"]
+LEN = ["--length", f"{LENGTH:g}"]
+TARGET = calib.default_target(GEOM, LENGTH)
 
 
 def k_t(dof):
@@ -220,8 +223,10 @@ def test_guard_errors():
 def scan(truths, seed=0, sled_sigma=0.0, scans=1):
     hw = Hardware(**truths)
     radar, sled = calib.sim_devices(hw, SWEEP, GEOM, TARGET, seed, sled_sigma)
-    recs = [calib.run_reflector(radar, sled, GEOM, TARGET) for _ in range(scans)]
-    rng = np.linalg.norm(np.asarray(TARGET) - [0.75, 0, GEOM.height])
+    recs = [
+        calib.run_reflector(radar, sled, GEOM, TARGET, LENGTH) for _ in range(scans)
+    ]
+    rng = np.linalg.norm(np.asarray(TARGET) - [0.5 * LENGTH, 0, GEOM.height])
     start = calib.nominal(hw)
     cal = dataclasses.replace(start, fs=hw.fs, n0=phase_delay_n0(hw, rng), ng=16)
     return hw, cal, recs
@@ -255,7 +260,9 @@ def test_reflector_ignores_radar_fixed_return_at_predicted_range():
     truths = ALT | {"hp_order": 0, "r_cal": 4.0}
     start = calib.nominal(Hardware(**truths))
     mid = np.mean([start.tx_offset, start.rx_offset], axis=0)
-    r_pred = np.linalg.norm(np.asarray(TARGET) - [0.75 + mid[0], mid[1], GEOM.height])
+    r_pred = np.linalg.norm(
+        np.asarray(TARGET) - [0.5 * LENGTH + mid[0], mid[1], GEOM.height]
+    )
     truths |= {"leak_amp": 0.05, "leak_range": r_pred - truths["r_cal"]}
     hw, cal, (rec,) = scan(truths, seed=4)
     res = calib.estimate_reflector(
@@ -360,7 +367,7 @@ def test_cli_steps(tmp_path, capsys):
 
 def test_cli_reflector_saved_and_refitted_offline(tmp_path):
     scan_file, rep = str(tmp_path / "scan.npz"), tmp_path / "report.json"
-    common = ["--frames-file", scan_file, "--report", str(rep), "--ramp-time", "16"]
+    common = ["--frames-file", scan_file, "--report", str(rep), *RAMP]
     assert run_cli(["calib", "reflector", "--sim", *common]) == 0
     first = json.loads(rep.read_text())["reflector"]
     assert Recording.load(scan_file).x_pos.size > 1
@@ -406,13 +413,25 @@ def read_report(path):
     return json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("quarters, expect", [(1.0, 180.0), (0.5, 90.0), (0.0, 0.0)])
-def test_pair_phase(quarters, expect):
+def line_phase_change(dx):
+    """Phase change (deg) of the reflector's line, the sum of its direct and
+    ground-image paths at the centre frequency, from sled 0 to `dx`."""
+    radar, sled = calib.sim_devices(Hardware(), SWEEP, GEOM, TARGET)
+    z = []
+    for x in (0.0, dx):
+        sled.move_to(x)
+        p = radar.paths()
+        z.append(np.sum(p.amp * np.exp(2j * np.pi * SWEEP.fc * p.delay)))
+    return abs(np.degrees(np.angle(z[1] * np.conj(z[0]))))
+
+
+@pytest.mark.parametrize("quarters", [1.0, 0.5, 0.0])
+def test_pair_phase(quarters):
     dx = quarters * calib.pair_step(SWEEP, GEOM, TARGET)
     a, b = static_sets([0.0, dx])
     phi = calib.pair_phase(a, b, SWEEP, FS_NOMINAL)
     assert -180.0 < phi <= 180.0
-    assert abs(abs(phi) - expect) < 10.0
+    assert abs(abs(phi) - line_phase_change(dx)) < 10.0
     back = calib.pair_phase(b, a, SWEEP, FS_NOMINAL)
     assert abs(np.mod(back + phi + 180.0, 360.0) - 180.0) < 5.0
 
@@ -428,7 +447,7 @@ def fixture_board(attach):
 
 def test_cli_hardware_pair(board, tmp_path, capsys, attach):
     a, b, rep = (str(tmp_path / f) for f in ("a.npz", "b.npz", "rep.json"))
-    common = ["--frames", "8", "--check-frames", "4", "--report", rep]
+    common = ["--frames", "8", "--check-frames", "4", "--report", rep, *RAMP]
     assert run_cli(["calib", "timing", "--frames-file", a, *common]) == 0
     assert not board.rf and board.log[-3:] == ["SWEEP:STOP", "SYST:ERR?", "POWE:RF?"]
     single = read_report(rep)["timing"]
@@ -522,7 +541,7 @@ def test_cli_first_up_sim(tmp_path, away):
 
 def test_cli_first_up_pair(board, tmp_path, capsys):
     a, b, rep = (str(tmp_path / f) for f in ("a.npz", "b.npz", "rep.json"))
-    common = ["--frames", "4", "--check-frames", "4", "--report", rep]
+    common = ["--frames", "4", "--check-frames", "4", "--report", rep, *RAMP]
     argv = ["calib", "first-up", "--frames-file", b, "--pair", a, *common]
     assert run_cli(["calib", "timing", "--frames-file", a, *common]) == 0
     assert run_cli(argv) == 2
@@ -601,7 +620,15 @@ def test_calibrate_cv_uses_device_timing():
     device = Timing(CV_FS, CV_N0, hw.first_up)
     radar, sled = calib.sim_devices(hw, CV_SWEEP, GEOM, TARGET, 1, timing=device)
     cal, report = calib.calibrate(
-        radar, sled, GEOM, TARGET, 0.12, calib.nominal(hw), frames=8, repeats=1
+        radar,
+        sled,
+        GEOM,
+        TARGET,
+        0.12,
+        calib.nominal(hw),
+        frames=8,
+        repeats=1,
+        length=LENGTH,
     )
     t = report["timing"]
     assert set(t) == {"if_delay", "se_if_delay", "device", "estimate"}
@@ -650,9 +677,9 @@ def test_cli_cv_reflector_from_recorded_scan(tmp_path):
     device = Timing(CV_FS, CV_N0, hw.first_up)
     radar, sled = calib.sim_devices(hw, CV_SWEEP, GEOM, TARGET, 2, timing=device)
     scan_file, rep, cal = (str(tmp_path / f) for f in ("s.npz", "r.json", "c.json"))
-    calib.run_reflector(radar, sled, GEOM, TARGET).save(scan_file)
+    calib.run_reflector(radar, sled, GEOM, TARGET, LENGTH).save(scan_file)
     calib.nominal(hw).save(cal)
-    argv = ["calib", "reflector", "--frames-file", scan_file, "--cal", cal]
+    argv = ["calib", "reflector", "--frames-file", scan_file, "--cal", cal, *LEN]
     assert run_cli(argv + ["--report", rep]) == 0
     res = read_report(rep)["reflector"]
     assert res["first_up_agrees"] and res["first_up"] == hw.first_up

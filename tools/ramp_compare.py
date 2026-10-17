@@ -12,6 +12,7 @@ import numpy as np
 
 from qmrdk.calib import estimate_timing, pair_phase
 from qmrdk.config import Calibration, ScanGeometry, Sweep
+from qmrdk.constants import SCAN_LENGTH
 from qmrdk.dsp.sar import form_image, phase_history
 from qmrdk.radar import HardwareSled, UsbRadar
 from qmrdk.render import grid, save_image
@@ -55,7 +56,7 @@ def main():
     ap.add_argument("--sled", help="sled serial URL")
     ap.add_argument("--frames", type=int, default=32)
     ap.add_argument("--noise-frames", type=int, default=64)
-    ap.add_argument("--length", type=float, default=0.85)
+    ap.add_argument("--length", type=float, default=SCAN_LENGTH)
     ap.add_argument("--steps", type=float, nargs="+", default=[0.05, 0.1, 0.15, 0.2])
     ap.add_argument("--ranges", type=float, nargs="+", default=[5.0, 8.2, 12.0, 20.0])
     ap.add_argument("--extent", type=float, nargs=4, default=[-8.0, 8.0, 3.0, 20.0])

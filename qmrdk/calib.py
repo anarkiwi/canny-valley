@@ -18,7 +18,7 @@ from scipy.optimize import least_squares
 from scipy.signal import butter, find_peaks, get_window, sosfiltfilt
 
 from qmrdk.config import Calibration, ScanGeometry, Sweep, Timing
-from qmrdk.constants import C, FS_NOMINAL
+from qmrdk.constants import C, FS_NOMINAL, SCAN_LENGTH
 from qmrdk.dsp.convert import as_volts
 from qmrdk.dsp.range import range_spectrum
 from qmrdk.dsp.sar import PhaseHistory, backproject, phase_history
@@ -212,9 +212,10 @@ def estimate_timing(
     cov = resid @ resid / dof * np.linalg.inv(design.T @ design)
     jitter = 0.0
     if k_frames > 1:
-        per = range_spectrum(_centred_ramps(_volts(frames), n0, nr, guard)[0], window)
-        nkf = _turnarounds(per, kp, omega, n0, nr, turn)
-        jitter = float((nkf - turn * nr).mean(axis=1).std(ddof=1))
+        per, jf = _centred_ramps(_volts(frames), n0, nr, guard)
+        tf = jf[1:].astype(np.float64)
+        nkf = _turnarounds(range_spectrum(per, window), kp, omega, n0, nr, tf)
+        jitter = float((nkf - tf * nr).mean(axis=1).std(ddof=1))
     se = np.append(np.sqrt(np.diag(cov)), 0.0)[:2]
     return TimingResult(
         fs=nr / sweep.ramp_time,
@@ -955,7 +956,7 @@ def estimate_repeatability(
     )
 
 
-def pair_step(sweep, geometry, target, x0=0.0, length=1.5, turns=0.25):
+def pair_step(sweep, geometry, target, x0=0.0, length=SCAN_LENGTH, turns=0.25):
     """Sled step that changes the reflector's range by `turns` wavelengths."""
     p = np.asarray(target, dtype=np.float64) - [x0, 0.0, geometry.height]
     slope = abs(p[0]) / np.linalg.norm(p)
@@ -972,7 +973,9 @@ def run_timing(radar, n=4096, frames=32, sled=None, dx=None):
     return np.stack([first, capture_frames(radar, n, frames, desc="timing +dx")])
 
 
-def run_reflector(radar, sled, geometry, target, length=1.5, n=4096, desc="reflector"):
+def run_reflector(
+    radar, sled, geometry, target, length=SCAN_LENGTH, n=4096, desc="reflector"
+):
     """Reflector scan over `[0, length]` at `dx = lam_min / 4`."""
     return run_scan(
         radar,
@@ -985,7 +988,7 @@ def run_reflector(radar, sled, geometry, target, length=1.5, n=4096, desc="refle
     )
 
 
-def run_repeat(radar, sled, geometry, target, length=1.5, n=4096, scans=5):
+def run_repeat(radar, sled, geometry, target, length=SCAN_LENGTH, n=4096, scans=5):
     """`scans` repeated reflector scans."""
     return [
         run_reflector(radar, sled, geometry, target, length, n, f"repeat {i + 1}")
@@ -993,7 +996,7 @@ def run_repeat(radar, sled, geometry, target, length=1.5, n=4096, scans=5):
     ]
 
 
-def default_target(geometry, length=1.5):
+def default_target(geometry, length=SCAN_LENGTH):
     """Step 3 placement: `TARGET_RANGE` from the aperture centre,
     `TARGET_ANGLE` off boresight, at antenna height."""
     a = math.radians(TARGET_ANGLE)
@@ -1039,7 +1042,7 @@ def calibrate(
     start,
     frames=32,
     repeats=3,
-    length=1.5,
+    length=SCAN_LENGTH,
     n=4096,
 ):
     """Steps 1–4 in order on any radar and sled: `(Calibration, report)`. A
@@ -1093,7 +1096,7 @@ def calibrate_sim(
     seed=0,
     frames=32,
     repeats=3,
-    length=1.5,
+    length=SCAN_LENGTH,
     target=None,
     sled_sigma=0.0,
 ):
@@ -1332,7 +1335,7 @@ _ARGS = (
         },
     ),
     ("--baseline", {"type": float, "help": "tx-rx aperture separation, m"}),
-    ("--length", {"type": float, "default": 1.5, "help": "scan length, m"}),
+    ("--length", {"type": float, "default": SCAN_LENGTH, "help": "scan length, m"}),
     ("--ramp-time", {"type": float, "default": 8.0, "help": "ramp time, ms"}),
     (
         "--offset-sigma",

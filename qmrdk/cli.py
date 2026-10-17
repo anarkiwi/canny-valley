@@ -9,7 +9,7 @@ import sys
 import numpy as np
 
 from qmrdk.config import Calibration, ScanGeometry, Sweep
-from qmrdk.constants import ADC_MAX, FS_NOMINAL
+from qmrdk.constants import ADC_MAX, FS_NOMINAL, SCAN_LENGTH
 from qmrdk.device import CV_TYPES, Device, DeviceError
 from qmrdk.dsp.convert import codes_to_volts
 from qmrdk.dsp.sar import form_image
@@ -188,7 +188,7 @@ def _demo(args):
     elif args.cal == "procedure":
         from qmrdk.calib import calibrate_sim  # pylint: disable=C0415,E0401,E0611
 
-        cal, report = calibrate_sim(hw, sweep, geometry, args.seed)
+        cal, report = calibrate_sim(hw, sweep, geometry, args.seed, length=args.length)
     else:
         cal = Calibration.load(args.cal)
     extent = scene_extent(scene, rec.x_pos)
@@ -429,7 +429,7 @@ def _sim_options(p, seed=0):
     p.add_argument("--f0", type=float, default=2.4, help="sweep start, GHz")
     p.add_argument("--f1", type=float, default=2.5, help="sweep stop, GHz")
     p.add_argument("--ramp-time", type=float, default=8.0, help="ramp time, ms")
-    p.add_argument("--length", type=float, default=1.5, help="rail span, m")
+    p.add_argument("--length", type=float, default=SCAN_LENGTH, help="rail span, m")
     p.add_argument("--dx", type=float, help="position spacing, m (lam_min / 4)")
     p.add_argument("--n", type=int, default=4096, help="samples per capture")
     p.add_argument("--height", type=float, default=1.0, help="rail height, m")

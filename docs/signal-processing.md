@@ -365,7 +365,7 @@ power domain:
 
 ## 11. Synthetic aperture imaging
 
-The radar is moved along a straight rail (aperture length `L`, 1.5 m for the
+The radar is moved along a straight rail (aperture length `L`, 0.85 m for the
 kit sled) and a two-dimensional image of the scene is formed from captures
 taken at known positions. Rail axis `x`, ground range `y`, antenna height
 ignored unless configured.
@@ -454,12 +454,12 @@ implemented as one numba kernel parallel over pixels.
 
 ### 11.4 Performance
 
-| Quantity | Expression | `L` = 1.5 m, `B` = 100 MHz |
+| Quantity | Expression | `L` = 0.85 m, `B` = 100 MHz |
 |----------|------------|------|
 | Down-range resolution | `c / (2B)` | 1.5 m |
-| Cross-range resolution at range `R` | `lam * R / (2L)` | 0.041 × `R` (0.4 m at 10 m) |
-| Angular resolution | `lam / (2L)` | 2.3° |
-| Positions at `dx = lam_min / 4` | `L / dx + 1` | 51 |
+| Cross-range resolution at range `R` | `lam * R / (2L)` | 0.072 × `R` (0.72 m at 10 m) |
+| Angular resolution | `lam / (2L)` | 4.1° |
+| Positions at `dx = lam_min / 4` | `ceil(L / dx) + 1` | 30 |
 | Phase error from ramp misalignment `delta` | `2 * pi * f_b * delta` | 0.03 rad at 48 m for 0.05 sample |
 
 Pixel spacing defaults to half the resolution in each axis, the cross-range
