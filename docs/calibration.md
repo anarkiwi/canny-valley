@@ -38,6 +38,7 @@ re-measured whenever any of these changes.
   ground. A tape measure good to 1 cm is sufficient for steps 1–3.
 * Measure the horizontal separation of the two antenna apertures with a
   ruler. This is the tx–rx baseline used in step 3.
+* Place the corner reflector of step 3 (layout in step 3).
 
 ## 1. Sweep period and frame timing (`fs`, `n0`)
 
@@ -176,9 +177,16 @@ reflector's transient is already below the Hann PSL at `G = 0`.
 
 Setup: one trihedral corner reflector (RCS ≥ 1 m² at 2.45 GHz, e.g. a
 30 cm triangular trihedral) at about 8 m from the aperture centre and 25°
-off boresight (`calib.default_target`), at antenna height and facing the
-rail, with nothing else within 2 m of it or of the line of sight. Survey
-its phase centre (the inner corner) to 1 cm. Being off boresight makes the
+off boresight (`calib.default_target`), its inner corner at antenna
+height, with nothing else within 2 m of it or of the line of sight. Aim
+its symmetry axis (equal angles to the three edges) at the aperture
+centre: with the base plate level the axis rises 35.3°, so tip the base
+down towards the radar by that much. Survey its phase centre (the inner
+corner) to 1 cm.
+
+![Reflector placement: plan view and side elevation](images/calibration-layout.svg)
+
+Being off boresight makes the
 range history slope along the rail, which makes the along-rail offset and
 the sled errors observable. It also makes the cross-track offset `oy`
 observable through the variation of the line-of-sight angle; near
