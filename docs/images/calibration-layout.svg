@@ -28,6 +28,13 @@
   <path d="M210,280 A70,70 0 0 1 239.6,286.6" fill="none" stroke="#222"/>
   <text x="220" y="272" fill="#222">25°</text>
 
+  <!-- offset of the inner corner from boresight -->
+  <line x1="320" y1="110" x2="320" y2="94" stroke="#222"/>
+  <line x1="210" y1="100" x2="320" y2="100" stroke="#222" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="265" y="94" text-anchor="middle" font-weight="bold" fill="#222">338 cm</text>
+  <text x="204" y="104" text-anchor="end" fill="#222">offset from boresight,</text>
+  <text x="204" y="120" text-anchor="end" fill="#222">725 cm along it</text>
+
   <!-- step 1 / 3a hand move along the line of sight -->
   <line x1="196" y1="344" x2="212" y2="310" stroke="#1f5fbf" stroke-width="2" marker-end="url(#arrb)"/>
   <text x="40" y="300" fill="#1f5fbf">steps 1, 3a without sled:</text>
