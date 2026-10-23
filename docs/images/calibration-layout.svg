@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 760" width="900" height="760" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#222"/>
+    </marker>
+    <marker id="arrb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f5fbf"/>
+    </marker>
+  </defs>
+  <rect width="900" height="760" fill="#fff"/>
+
+  <!-- Plan view -->
+  <text x="20" y="28" font-size="16" font-weight="bold" fill="#222">Plan view (from above; rail not to scale)</text>
+
+  <!-- clear zone: 2 m about the reflector and the line of sight -->
+  <polygon points="151.1,322.4 268.9,377.6 378.9,141.6 261.1,86.4" fill="#e8f3e8" stroke="none"/>
+  <circle cx="320" cy="114" r="65" fill="#e8f3e8" stroke="#6aa86a" stroke-dasharray="5 4"/>
+  <polyline points="151.1,322.4 261.1,86.4" fill="none" stroke="#6aa86a" stroke-dasharray="5 4"/>
+  <polyline points="268.9,377.6 378.9,141.6" fill="none" stroke="#6aa86a" stroke-dasharray="5 4"/>
+  <text x="392" y="70" fill="#3d7a3d">keep clear: 2 m about the</text>
+  <text x="392" y="86" fill="#3d7a3d">reflector and the line of sight</text>
+
+  <!-- boresight and line of sight -->
+  <line x1="210" y1="350" x2="210" y2="50" stroke="#888" stroke-dasharray="8 5"/>
+  <text x="150" y="60" fill="#666">boresight</text>
+  <line x1="210" y1="350" x2="320" y2="114" stroke="#c0392b" stroke-width="2"/>
+  <text x="272" y="240" fill="#c0392b">8 m</text>
+  <path d="M210,280 A70,70 0 0 1 239.6,286.6" fill="none" stroke="#222"/>
+  <text x="220" y="272" fill="#222">25°</text>
+
+  <!-- step 1 / 3a hand move along the line of sight -->
+  <line x1="196" y1="344" x2="212" y2="310" stroke="#1f5fbf" stroke-width="2" marker-end="url(#arrb)"/>
+  <text x="40" y="300" fill="#1f5fbf">steps 1, 3a without sled:</text>
+  <text x="40" y="316" fill="#1f5fbf">move straight towards</text>
+  <text x="40" y="332" fill="#1f5fbf">the reflector</text>
+
+  <!-- rail, sled, antennas -->
+  <rect x="105" y="352" width="210" height="8" fill="#bbb" stroke="#666"/>
+  <rect x="180" y="338" width="60" height="14" fill="#ddd" stroke="#444"/>
+  <rect x="186" y="331" width="12" height="7" fill="#444"/>
+  <rect x="222" y="331" width="12" height="7" fill="#444"/>
+  <text x="178" y="326" font-size="11" fill="#222">TX</text>
+  <text x="225" y="326" font-size="11" fill="#222">RX</text>
+  <circle cx="210" cy="350" r="3" fill="#c0392b"/>
+  <line x1="120" y1="372" x2="300" y2="372" stroke="#222" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="140" y="390" fill="#222">scan 0.85 m (SCAN_LENGTH)</text>
+  <line x1="192" y1="398" x2="228" y2="398" stroke="#222"/>
+  <line x1="192" y1="394" x2="192" y2="402" stroke="#222"/>
+  <line x1="228" y1="394" x2="228" y2="402" stroke="#222"/>
+  <text x="236" y="402" fill="#222">tx–rx baseline (ruler)</text>
+
+  <!-- axes at rail origin -->
+  <circle cx="120" cy="356" r="4" fill="none" stroke="#222" stroke-width="2"/>
+  <line x1="120" y1="420" x2="175" y2="420" stroke="#222" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="120" y1="420" x2="120" y2="380" stroke="#222" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="180" y="424" fill="#222">x along rail</text>
+  <text x="40" y="378" fill="#222">rail origin</text>
+  <text x="40" y="394" fill="#222">x = 0</text>
+  <text x="108" y="392" fill="#222">y</text>
+
+  <!-- reflector (base plate seen from above, open side towards the aperture) -->
+  <polygon points="320,114 288.0,125.6 331.6,146.0" fill="#f6d27a" stroke="#8a6d1a"/>
+  <line x1="320" y1="114" x2="288.0" y2="125.6" stroke="#8a6d1a" stroke-width="4"/>
+  <line x1="320" y1="114" x2="331.6" y2="146.0" stroke="#8a6d1a" stroke-width="4"/>
+  <circle cx="320" cy="114" r="3.5" fill="#c0392b"/>
+  <line x1="324" y1="110" x2="390" y2="128" stroke="#222"/>
+  <text x="394" y="126" fill="#222">phase centre = inner corner, surveyed to 1 cm</text>
+  <text x="394" y="142" fill="#222">(3.81, 7.25, 1.00) m for the defaults (calib.default_target)</text>
+
+  <!-- notes -->
+  <g fill="#222">
+    <text x="520" y="250" font-weight="bold">Corner reflector (step 3)</text>
+    <text x="520" y="270">• trihedral, RCS ≥ 1 m² at 2.45 GHz</text>
+    <text x="534" y="286">(e.g. 30 cm triangular)</text>
+    <text x="520" y="306">• 8 m from the aperture centre,</text>
+    <text x="534" y="322">25° off boresight</text>
+    <text x="520" y="342">• inner corner at antenna height</text>
+    <text x="520" y="362">• symmetry axis (equal angles to the</text>
+    <text x="534" y="378">three edges) aimed at the aperture centre</text>
+    <text x="520" y="398">• same rail origin for survey and imaging</text>
+  </g>
+
+  <line x1="20" y1="450" x2="880" y2="450" stroke="#ccc"/>
+
+  <!-- Side elevation -->
+  <text x="20" y="478" font-size="16" font-weight="bold" fill="#222">Side elevation (along the line of sight; heights exaggerated)</text>
+
+  <!-- ground -->
+  <rect x="40" y="600" width="820" height="140" fill="#f3efe6"/>
+  <line x1="40" y1="600" x2="860" y2="600" stroke="#8a7a5a" stroke-width="2"/>
+  <text x="790" y="618" fill="#8a7a5a">ground z = 0</text>
+
+  <!-- radar on rail post -->
+  <line x1="120" y1="600" x2="120" y2="533" stroke="#666" stroke-width="4"/>
+  <rect x="108" y="517" width="16" height="16" fill="#444"/>
+  <circle cx="120" cy="525" r="3" fill="#c0392b"/>
+  <text x="56" y="514" fill="#222">antennas</text>
+  <line x1="96" y1="525" x2="96" y2="600" stroke="#222" marker-start="url(#arr)" marker-end="url(#arr)"/>
+  <text x="80" y="566" fill="#222">h</text>
+  <text x="12" y="584" font-size="11" fill="#222">ScanGeometry</text>
+  <text x="12" y="597" font-size="11" fill="#222">.height</text>
+
+  <!-- reflector on stand, tipped so its axis is level -->
+  <line x1="720" y1="600" x2="720" y2="540" stroke="#666" stroke-width="3"/>
+  <polygon points="720,525 695.4,542.2 702.8,500.4" fill="#f6d27a" stroke="#8a6d1a"/>
+  <line x1="720" y1="525" x2="695.4" y2="542.2" stroke="#8a6d1a" stroke-width="4"/>
+  <line x1="720" y1="525" x2="702.8" y2="500.4" stroke="#8a6d1a" stroke-width="4"/>
+  <circle cx="720" cy="525" r="3.5" fill="#c0392b"/>
+  <text x="732" y="512" fill="#222">base tipped 35.3° down</text>
+  <text x="732" y="528" fill="#222">towards the radar:</text>
+  <text x="732" y="544" fill="#222">axis level</text>
+
+  <!-- direct path -->
+  <line x1="120" y1="525" x2="720" y2="525" stroke="#c0392b" stroke-width="2"/>
+  <text x="380" y="517" fill="#c0392b">direct</text>
+
+  <!-- ground bounce via the reflector's image -->
+  <polyline points="120,525 420,600 720,525" fill="none" stroke="#1f5fbf" stroke-width="2"/>
+  <line x1="420" y1="600" x2="720" y2="675" stroke="#1f5fbf" stroke-dasharray="5 4"/>
+  <circle cx="720" cy="675" r="3.5" fill="none" stroke="#1f5fbf"/>
+  <text x="600" y="700" fill="#1f5fbf">ground image of the reflector</text>
+  <text x="240" y="584" fill="#1f5fbf">one leg bounced (tx or rx)</text>
+  <g fill="#222">
+    <text x="60" y="644">Four paths: direct, tx leg bounced, rx leg bounced, both bounced.</text>
+    <text x="60" y="662">Their excess lengths are far below a range cell and nearly cancel at low</text>
+    <text x="60" y="680">grazing; the step 3 estimator models all four.</text>
+  </g>
+</svg>
