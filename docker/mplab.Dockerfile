@@ -9,7 +9,7 @@
 #     ipecmd.sh -TPPK5 -P24FJ256GB106 -GF/out/qmrdk-u4.hex
 # --build-arg IDE=1 also installs the IDE, for the mdb command-line debugger
 # (mdb.sh), tagged e.g. canny-valley-mdb.
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 ARG MPLABX=6.35
 ARG IDE=0
 ENV DEBIAN_FRONTEND=noninteractive
