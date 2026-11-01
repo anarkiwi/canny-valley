@@ -7,7 +7,7 @@ name = "qmrdk"
 version = "0.1.0"
 description = "Linux/USB control, signal processing and rail SAR imaging for the QM-RDK radar kit"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "numpy", "scipy", "numba", "finufft", "matplotlib", "pillow", "tqdm",
   "pyvisa", "pyvisa-py", "pyusb", "pyserial",
